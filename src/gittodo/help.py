@@ -215,7 +215,10 @@ affiche « figé depuis »
 
 ## Icône de la barre
 
-Par défaut, la photo de l'identité observée et une pastille rouge. `badge_style` accepte aussi \
+Par défaut, la photo de l'identité observée, une pastille rouge, et un anneau qui se remplit \
+dans le sens horaire jusqu'au prochain cycle. L'anneau s'efface pendant une lecture, où le \
+compteur animé prend le relais, et quand une source ne répond plus, où le décompte n'a plus de \
+sens. `show_refresh_ring` l'éteint. `badge_style` accepte aussi \
 `count`, `icon_count` et `icon`, plus étroits quand la barre des menus est saturée. \
 ⌘-glisser l'icône vers la droite la met à l'abri des masquages de macOS.
 """

@@ -117,6 +117,13 @@ SOURCES = {
 # Triangle d'avertissement posé à la place de la pastille de comptage : le rouge de la pastille
 # compte ce qu'il y a à faire, celui-ci dit que le compte lui-même n'est pas fiable.
 ALERT_SIZE = 14.0
+# Anneau de progression autour de la photo dans la barre. La barre fait 22 pt de haut : 21 pt
+# de diamètre extérieur laissent un demi-point de marge de chaque côté, et un trait fin suffit
+# à le lire sans manger la photo.
+RING_SIZE = 21.0
+RING_WIDTH = 1.5
+# Le remplissage avance par pas d'une seconde : inutile de redessiner plus souvent que le tic.
+RING_STEPS = 60
 # Trois niveaux, du moins au plus grave, avec le mot qui titre la section et la couleur du
 # triangle. Le niveau croise nos propres échecs et la gravité annoncée par GitHub.
 LEVELS = {
@@ -300,6 +307,48 @@ def _alert_symbol(level: str, size: float):
     return glyph.imageWithSymbolConfiguration_(
         NSImageSymbolConfiguration.configurationWithPaletteColors_([NSColor.whiteColor(), tint])
     )
+
+
+def _with_ring(face, fraction: float, size: float = RING_SIZE):
+    """Photo entourée d'un anneau qui se remplit dans le sens horaire jusqu'au prochain cycle.
+
+    Les couleurs sont résolues sous l'apparence effective de l'application : un dessin hors
+    fenêtre les résoudrait à l'envers, et l'anneau disparaîtrait sur une barre claire.
+    """
+    if face is None:
+        return None
+    inner = size - 2 * (RING_WIDTH + 0.5)
+    canvas = NSImage.alloc().initWithSize_(NSMakeSize(size, size))
+    middle = size / 2
+
+    def paint():
+        canvas.lockFocus()
+        face.drawInRect_fromRect_operation_fraction_(
+            NSMakeRect(middle - inner / 2, middle - inner / 2, inner, inner),
+            NSZeroRect,
+            NSCompositingOperationSourceOver,
+            1.0,
+        )
+        radius = (size - RING_WIDTH) / 2
+        track = NSBezierPath.bezierPathWithOvalInRect_(
+            NSMakeRect(RING_WIDTH / 2, RING_WIDTH / 2, size - RING_WIDTH, size - RING_WIDTH)
+        )
+        track.setLineWidth_(RING_WIDTH)
+        NSColor.quaternaryLabelColor().setStroke()
+        track.stroke()
+        if fraction > 0:
+            arc = NSBezierPath.bezierPath()
+            # Départ à midi, dans le sens horaire : c'est le sens d'un cadran.
+            arc.appendBezierPathWithArcWithCenter_radius_startAngle_endAngle_clockwise_(
+                (middle, middle), radius, 90.0, 90.0 - 360.0 * min(1.0, fraction), True
+            )
+            arc.setLineWidth_(RING_WIDTH)
+            NSColor.secondaryLabelColor().setStroke()
+            arc.stroke()
+        canvas.unlockFocus()
+
+    NSApplication.sharedApplication().effectiveAppearance().performAsCurrentDrawingAppearance_(paint)
+    return canvas
 
 
 def _with_alert(base, size: float, level: str):
@@ -558,6 +607,7 @@ class GitTodoApp(NSObject):
         self.service: tuple[str, str] = ("", "")
         self.service_at = None
         self.fetch_started = None
+        self.shown_step = -1
         return self
 
     # --- cycle de vie ---------------------------------------------------
@@ -594,6 +644,10 @@ class GitTodoApp(NSObject):
                 self.build_menu(self.menu)
             else:
                 self.update_footer()
+        # L'anneau avance seul : on ne repeint que la barre, et seulement quand le pas change.
+        if self.cfg.show_refresh_ring and self.ring_step() != self.shown_step:
+            self.shown_step = self.ring_step()
+            self.repaint_ring()
         if self.countdown() <= 0:
             self.start_fetch()
 
@@ -702,6 +756,19 @@ class GitTodoApp(NSObject):
     @objc.python_method
     def is_frozen(self) -> bool:
         return self.frozen_for() > max(4 * self.interval(), FROZEN_AFTER)
+
+    @objc.python_method
+    def progress(self) -> float:
+        """Part du cycle déjà écoulée, entre 0 et 1."""
+        if self.snapshot.fetched_at is None:
+            return 0.0
+        interval = max(1, self.interval())
+        return max(0.0, min(1.0, (now() - self.snapshot.fetched_at).total_seconds() / interval))
+
+    @objc.python_method
+    def ring_step(self) -> int:
+        """Pas d'avancement affiché : redessiner plus finement ne se verrait pas."""
+        return int(self.progress() * RING_STEPS)
 
     @objc.python_method
     def countdown(self) -> int:
@@ -1069,16 +1136,31 @@ class GitTodoApp(NSObject):
         )
 
     @objc.python_method
+    def repaint_ring(self) -> None:
+        """Repeint la seule image de la barre, pour faire avancer l'anneau.
+
+        Passer par `render()` réécrirait le fichier d'état à chaque seconde, pour une image qui
+        change d'un degré.
+        """
+        if self.status_item is None or self.loading() or self.health:
+            return
+        count, urgent = summarize(self.visible())
+        self.draw_badge(count, urgent, str(count) if count else "")
+
+    @objc.python_method
     def draw_badge(self, count: int, urgent: bool, badge: str) -> dict:
         """Peint l'élément de la barre et décrit ce qui a été affiché."""
         button = self.status_item.button()
         if self.cfg.badge_style == "avatar":
             photo = self.avatars.image(self.person_for(self.snapshot.identity).avatar, BAR_SIZE)
             if photo is not None:
+                # L'anneau ne dit quelque chose que si le cycle tourne : pendant une lecture le
+                # compteur animé prend le relais, et en panne le décompte n'a plus de sens.
+                ring = self.cfg.show_refresh_ring and not self.health and not self.fetching
+                base = _with_ring(photo, self.progress()) if ring else photo
+                span = RING_SIZE if ring else BAR_SIZE
                 portrait = (
-                    _with_alert(photo, BAR_SIZE, self.level())
-                    if self.health
-                    else _with_count(photo, badge, BAR_SIZE)
+                    _with_alert(base, span, self.level()) if self.health else _with_count(base, badge, span)
                 )
                 # Longueur variable : macOS ajoute 16 pt de marge à la longueur demandée,
                 # donc imposer une largeur ne fait que l'élargir.

@@ -94,6 +94,8 @@ pour elle.
 - **⌘** maintenu : la ligne devient « Copier le lien ».
 - **⌘R** : actualise tout de suite.
 - Le point ● marque ce qui est arrivé depuis la dernière ouverture du menu.
+- Un anneau se remplit autour de la photo, dans le sens horaire, jusqu'au prochain cycle : le
+  délai avant la prochaine lecture se voit sans ouvrir le menu.
 
 Le menu se met à jour pendant qu'il est ouvert, sans qu'il faille le refermer.
 

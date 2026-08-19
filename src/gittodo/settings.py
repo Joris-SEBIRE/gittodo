@@ -86,6 +86,12 @@ FORM: tuple[tuple[str, tuple[tuple[str, str, str, str], ...]], ...] = (
         (
             ("badge_style", "Format de l'élément", "du plus large au plus étroit quand la barre est saturée", ""),
             ("hide_when_zero", "Masquer quand il n'y a rien à faire", "", ""),
+            (
+                "show_refresh_ring",
+                "Anneau du prochain cycle",
+                "il se remplit autour de la photo jusqu'à la prochaine lecture",
+                "",
+            ),
         ),
     ),
     (

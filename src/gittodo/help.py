@@ -157,6 +157,14 @@ Les premières attendent un geste et comptent dans la pastille de la barre. Les 
 
 - un commentaire de code et un commentaire général sont un même objet, un message. Tous ceux \
 d'une PR tiennent sur une ligne
+- un fil de code est une conversation : y répondre répond au fil, et ce qui suit ta dernière \
+intervention reste en attente. La discussion générale est une liste plate : seule une citation \
+à chevrons, celle que GitHub écrit avec « Quote reply », y marque un message comme traité. \
+Reprendre la parole sans citer ne clôt rien, et une commande de bot comme `/run-e2e` n'est pas \
+une prise de parole
+- une citation désigne le message dont elle reprend le plus de lignes. Si deux messages \
+correspondent autant l'un que l'autre, aucun n'est acquitté : mieux vaut deux lignes en attente \
+qu'une demande effacée par erreur. Une réaction les départage
 - être nommé met dans la conversation : un message qui écrit `@toi` attend ta réponse même si tu \
 n'as jamais parlé dans cette PR. Seuls les messages qui te nomment comptent alors, pas la suite \
 de l'échange, et un `@toi` dans un bloc de code ou dans une citation n'en est pas un

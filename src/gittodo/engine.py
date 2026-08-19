@@ -31,6 +31,19 @@ def _humans(comments: tuple[Comment, ...], ignored: set[str]) -> list[Comment]:
 CODE = re.compile(r"```.*?```|`[^`]*`", re.S)
 
 
+COMMAND = re.compile(r"^/[a-z0-9][\w-]*(\s.*)?$", re.I)
+
+
+def _is_command(body: str) -> bool:
+    """Commentaire qui n'est qu'une commande adressée à un bot, `/run-e2e` par exemple.
+
+    Ce n'est pas une prise de parole : le compter comme telle ferait passer pour traité tout
+    ce qui précède, alors que personne n'a répondu à personne.
+    """
+    lines = [line.strip() for line in (body or "").splitlines() if line.strip()]
+    return bool(lines) and all(COMMAND.match(line) for line in lines)
+
+
 def _names(text: str, me: str) -> bool:
     """`@moi` dans un texte, sans attraper un login plus long qui commence pareil.
 
@@ -64,6 +77,75 @@ def _named_out_of_sight(pr: PullRequest, me: str, cfg: Config) -> bool:
     everything = _all_comments(pr)
     # Bots compris : un robot qui me nomme rend la mention visible, donc suivie ailleurs.
     return not any(c.author == me or _names(c.body, me) for c in everything)
+
+
+QUOTE = re.compile(r"^\s*(?:>\s*)+(.*)$")
+# Les empreintes sont tronquées : au-delà, une ligne recopiée puis reformatée cesserait de
+# correspondre à elle-même.
+GIST_MAX = 60
+
+
+def _gist(line: str) -> str:
+    """Empreinte d'une ligne, espaces et casse normalisés."""
+    return " ".join((line or "").split()).lower()[:GIST_MAX]
+
+
+def _quoted(body: str) -> set[str]:
+    """Empreintes des lignes citées dans un message, chevrons retirés."""
+    quotes = set()
+    for line in (body or "").splitlines():
+        if found := QUOTE.match(line):
+            if gist := _gist(found.group(1)):
+                quotes.add(gist)
+    return quotes
+
+
+def _quoted_target(quotes: set[str], earlier: list[tuple[int, Comment]]) -> int | None:
+    """Position du message que cette citation désigne, ou rien si elle en désigne plusieurs.
+
+    On garde les candidats qui partagent le plus de lignes avec la citation : une réponse citée
+    recopie tout le message, donc le bon candidat se détache presque toujours. Une seule
+    correspondance suffit, même sur une ligne courte : c'est l'unicité qui identifie, pas la
+    longueur. À égalité, on ne tranche pas et les messages concernés restent en attente, plutôt
+    que d'acquitter le mauvais.
+    """
+    scores: dict[int, int] = {}
+    for position, comment in earlier:
+        lines = {_gist(line) for line in comment.body.splitlines()}
+        if shared := len(lines & quotes):
+            scores[position] = shared
+    if not scores:
+        return None
+    best = max(scores.values())
+    winners = [position for position, shared in scores.items() if shared == best]
+    return winners[0] if len(winners) == 1 else None
+
+
+def _unanswered(humans: list[Comment], me: str, acks: set[str], only_named: bool = False) -> list[Comment]:
+    """Messages des autres qu'aucun de mes messages postérieurs ne cite.
+
+    La discussion générale d'une PR est une liste plate, pas un fil : y reprendre la parole ne
+    répond à rien en particulier, et la règle « depuis ma dernière intervention » laissait
+    tomber tout ce qui précédait. La citation à chevrons, que GitHub écrit quand on répond
+    vraiment à un message, est le seul signal explicite disponible. Une réaction reste
+    l'autre façon d'acter un point.
+    """
+    answered: set[int] = set()
+    for index, comment in enumerate(humans):
+        if comment.author != me:
+            continue
+        if quotes := _quoted(comment.body):
+            earlier = [(position, c) for position, c in enumerate(humans[:index]) if c.author != me]
+            if (target := _quoted_target(quotes, earlier)) is not None:
+                answered.add(target)
+    return [
+        comment
+        for position, comment in enumerate(humans)
+        if comment.author != me
+        and position not in answered
+        and not acks.intersection(comment.my_reactions)
+        and (not only_named or _names(comment.body, me))
+    ]
 
 
 def _pending(humans: list[Comment], me: str, acks: set[str], from_mention: bool = False) -> list[Comment]:
@@ -158,6 +240,11 @@ def _messages(pr: PullRequest, me: str, ignored: set[str], acks: set[str]) -> li
     ouvert. Le troisième cas — j'ai parlé en dernier — est du suivi, pas une action.
     """
     mine = pr.author == me
+
+    def speech(comments: tuple[Comment, ...]) -> list[Comment]:
+        """Les messages humains, mes commandes de bot exclues : elles ne répondent à rien."""
+        return [c for c in _humans(comments, ignored) if not (c.author == me and _is_command(c.body))]
+
     to_answer: list[tuple[Comment, bool]] = []
     to_check: list[tuple[Comment, bool]] = []
     awaited: dict[str, Comment] = {}
@@ -172,24 +259,27 @@ def _messages(pr: PullRequest, me: str, ignored: set[str], acks: set[str]) -> li
         if silent and not any(_names(c.body, me) for c in humans):
             return
         portraits.update({c.author: c.avatar for c in humans if c.avatar})
-        if last.author == me:
+        # Un fil de code est une conversation : y répondre répond au fil. La discussion générale
+        # est une liste plate, où seule une citation dit à quoi on répond.
+        pending = (
+            _pending(humans, me, acks, silent) if on_code else _unanswered(humans, me, acks, silent)
+        )
+        if pending:
+            # Le fil que j'ai ouvert est à moi de le clore : je lis la réponse puis je résous.
+            (to_check if opener == me else to_answer).extend((comment, on_code) for comment in pending)
+        elif last.author == me:
             # On attend l'autre partie : l'auteur sur la PR d'autrui, le reviewer sur la mienne.
             # Tous ceux dont on attend une réponse, pas seulement le premier : la ligne montre
             # leurs visages, et l'infobulle les nomme.
             for other in sorted(speakers - {me}) or ([pr.author] if not mine else []):
                 awaited.setdefault(other, last)
-            return
-        if not (pending := _pending(humans, me, acks, silent)):
-            return  # tout est accusé de réception
-        # Le fil que j'ai ouvert est à moi de le clore : je lis la réponse puis je résous.
-        (to_check if opener == me else to_answer).extend((comment, on_code) for comment in pending)
 
     for thread in pr.threads:
         if thread.resolved:
             continue
-        if humans := _humans(thread.comments, ignored):
+        if humans := speech(thread.comments):
             collect(humans, thread.opener or humans[0].author)
-    if humans := _humans(pr.comments, ignored):
+    if humans := speech(pr.comments):
         collect(humans, humans[0].author, on_code=False)
 
     items: list[Item] = []

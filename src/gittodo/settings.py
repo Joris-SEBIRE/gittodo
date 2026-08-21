@@ -49,6 +49,7 @@ FORM: tuple[tuple[str, tuple[tuple[str, str, str, str], ...]], ...] = (
             ("max_per_search", "PR par recherche", "chaque PR lue coûte du quota", ""),
             ("branch_refresh_seconds", "Balayage des branches", "il dure une vingtaine de secondes", ""),
             ("mention_refresh_seconds", "Boîte des non-lues", "jusqu'à dix appels REST pour la parcourir", ""),
+            ("closed_refresh_seconds", "Suivi des clôturées", "deux recherches, mesurées à 3 points", ""),
         ),
     ),
     (
@@ -79,6 +80,9 @@ FORM: tuple[tuple[str, tuple[tuple[str, str, str, str], ...]], ...] = (
                 "linear, dependabot",
             ),
             ("acknowledge_reactions", "Réactions qui valent réponse", "aucune cochée désactive la règle", ""),
+            ("show_closed", "Suivi des PR clôturées", "messages restés sans réponse, et historique", ""),
+            ("closed_days", "Fenêtre des clôturées", "profondeur du suivi des PR sorties du périmètre", ""),
+            ("closed_history_rows", "Lignes d'historique", "nombre de clôtures affichées, les plus récentes", ""),
         ),
     ),
     (
@@ -126,7 +130,7 @@ CHECKLIST = {
 CHECKLIST_COLUMNS = 2
 # Unité déduite du suffixe du champ : elle est déjà dans son nom, la recopier à la main dans le
 # libellé la laisserait se contredire le jour où l'une des deux change.
-UNITS = (("_seconds", "s"),)
+UNITS = (("_seconds", "s"), ("_days", "j"), ("_rows", "lignes"))
 # Une commande shell se lit avec des espaces ; les autres listes sont des énumérations.
 SPACED = {"token_command"}
 

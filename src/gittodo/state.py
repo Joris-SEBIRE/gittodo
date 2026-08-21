@@ -81,11 +81,18 @@ class State:
         # {clé: empreinte} — l'entrée expire dès que l'élément bouge sur GitHub.
         self.dismissed: dict[str, str] = dict(raw.get("dismissed") or {})
         self.seen: dict[str, str] = dict(raw.get("seen") or {})
+        # Lignes du suivi des PR clôturées déjà ouvertes : elles cessent alors de compter dans
+        # la pastille violette, tout en restant dans la liste pour y revenir.
+        self.opened: dict[str, str] = dict(raw.get("opened") or {})
         self.scope = ""
 
     def save(self) -> None:
         STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        STATE_PATH.write_text(json.dumps({"dismissed": self.dismissed, "seen": self.seen}, indent=1))
+        STATE_PATH.write_text(
+            json.dumps(
+                {"dismissed": self.dismissed, "seen": self.seen, "opened": self.opened}, indent=1
+            )
+        )
 
     def key(self, item: Item) -> str:
         return f"{self.scope}{SEPARATOR}{item.id}" if self.scope else item.id
@@ -105,6 +112,22 @@ class State:
         self.dismissed[self.key(item)] = item.fingerprint
         self.seen[self.key(item)] = item.fingerprint
         self.save()
+
+    def is_opened(self, item: Item) -> bool:
+        return self.opened.get(self.key(item)) == item.fingerprint
+
+    def mark_opened(self, items: list[Item]) -> None:
+        for item in items:
+            self.opened[self.key(item)] = item.fingerprint
+        self.save()
+
+    def knows_closed(self) -> bool:
+        """A-t-on déjà vu passer du suivi de clôtures pour cette identité ?
+
+        Sert à ne pas servir un mois d'historique comme autant de nouveautés au premier
+        lancement : ce qui précède la première observation est marqué ouvert d'office.
+        """
+        return any(self.in_scope(key) for key in self.opened)
 
     def dismissed_here(self) -> list[str]:
         return [key for key in self.dismissed if self.in_scope(key)]
@@ -128,6 +151,7 @@ class State:
 
         self.dismissed = keep(self.dismissed)
         self.seen = keep(self.seen)
+        self.opened = keep(self.opened)
 
     def visible(self, items: list[Item]) -> list[Item]:
         return [item for item in items if not self.is_dismissed(item)]

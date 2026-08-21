@@ -32,10 +32,11 @@ class Config:
     max_per_search: int = 12
     # Auteurs dont les commentaires ne déclenchent jamais un « à répondre ».
     ignored_authors: list[str] = field(default_factory=lambda: list(DEFAULT_IGNORED))
-    # Réactions qui valent accusé de réception : le message est traité, il ne compte plus.
+    # Réactions qui valent accusé de réception : le message est traité, il ne compte plus. Le
+    # pouce vers le bas en fait partie, parce qu'un refus est une réponse.
     # Contenus GitHub possibles : THUMBS_UP, THUMBS_DOWN, LAUGH, HOORAY, CONFUSED, HEART,
     # ROCKET, EYES.
-    acknowledge_reactions: list[str] = field(default_factory=lambda: ["THUMBS_UP"])
+    acknowledge_reactions: list[str] = field(default_factory=lambda: ["THUMBS_UP", "THUMBS_DOWN"])
     # true : « à reviewer » ne garde que les demandes nominatives, pas celles faites à une équipe.
     direct_review_requests_only: bool = True
     # Login d'un collègue pour voir l'app à sa place, null pour soi-même.
@@ -52,6 +53,12 @@ class Config:
     # chaque cycle, alors qu'une mention n'arrive pas à la seconde.
     mention_refresh_seconds: int = 300
     # Sections informatives (en attente, brouillons) affichées sous les actions.
+    # Suivi parallèle des PR sorties du périmètre ouvert : ce qui reste à répondre dessus, et
+    # l'histoire de mes clôtures. Deux recherches mesurées à 3 points, sur leur propre cadence.
+    show_closed: bool = True
+    closed_days: int = 30
+    closed_history_rows: int = 10
+    closed_refresh_seconds: int = 300
     show_waiting: bool = True
     # Les brouillons ne remontent ni CI en échec ni absence de reviewer.
     drafts_are_actionable: bool = False

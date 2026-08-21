@@ -33,6 +33,7 @@ class Kind(str, Enum):
     DRAFT = "draft"
     ORPHAN_BRANCH = "orphan_branch"
     BRANCH_TO_DELETE = "branch_to_delete"
+    RECENTLY_CLOSED = "recently_closed"
 
 
 @dataclass(frozen=True)
@@ -57,7 +58,7 @@ GROUPS: dict[Kind, Group] = {
     Kind.MENTION: Group(Kind.MENTION, "Mentions", "at", True),
     Kind.CHANGES_REQUESTED: Group(Kind.CHANGES_REQUESTED, "Mes PR à corriger", "arrow.uturn.left", True, True),
     Kind.CONFLICTS: Group(Kind.CONFLICTS, "Mes PR en conflit", "arrow.triangle.branch", True, True),
-    Kind.CI_FAILING: Group(Kind.CI_FAILING, "Mes PR, CI en échec", "xmark.octagon", True, True),
+    Kind.CI_FAILING: Group(Kind.CI_FAILING, "Mes PR avec CI rouge", "xmark.octagon", True, True),
     Kind.READY_TO_MERGE: Group(Kind.READY_TO_MERGE, "Mes PR à merger", "checkmark.seal", True),
     Kind.NO_REVIEWER: Group(Kind.NO_REVIEWER, "Mes PR sans reviewer", "person.badge.plus", True),
     Kind.WAITING_REVIEW: Group(Kind.WAITING_REVIEW, "Mes PR en attente de review", "clock", False),
@@ -72,6 +73,9 @@ GROUPS: dict[Kind, Group] = {
     ),
     Kind.ORPHAN_BRANCH: Group(Kind.ORPHAN_BRANCH, "Mes branches sans PR", "arrow.branch", False),
     Kind.BRANCH_TO_DELETE: Group(Kind.BRANCH_TO_DELETE, "Mes branches à supprimer", "trash", False),
+    # Histoire, pas travail : en toute fin de menu. Ses lignes comptent malgré tout, dans la
+    # pastille violette et non dans la rouge, tant qu'on ne les a pas ouvertes.
+    Kind.RECENTLY_CLOSED: Group(Kind.RECENTLY_CLOSED, "Mes PR récemment clôturées", "flag.checkered", False),
 }
 
 # L'ordre du menu est celui de ce dictionnaire : d'abord ce qu'on attend de moi, puis mes
@@ -259,6 +263,9 @@ class Item:
     tag: str = ""
     # None = l'urgence par défaut de la catégorie.
     urgent: bool | None = None
+    # La PR n'est plus ouverte : la ligne compte dans la pastille violette, pas dans la rouge.
+    # Les deux sommes restent égales à leur badge respectif.
+    closed: bool = False
 
     @property
     def group(self) -> Group:
@@ -267,6 +274,17 @@ class Item:
     @property
     def is_urgent(self) -> bool:
         return self.group.urgent if self.urgent is None else self.urgent
+
+
+@dataclass(frozen=True)
+class Closure:
+    """Ce qui est arrivé à une PR sortie du périmètre ouvert, et par la main de qui."""
+
+    pr: PullRequest
+    merged: bool
+    actor: str
+    actor_avatar: str
+    at: datetime
 
 
 @dataclass

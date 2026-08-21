@@ -96,6 +96,11 @@ boîte est celle du token, donc rien en mode « voir en tant que », elle est lu
 de cent au plus et le menu signale la troncature au-delà, et l'API ne donne ni auteur ni \
 numéro : `resolve_mentions()` les complète en une requête d'alias pour tout le lot. Ouvrir la \
 PR la marque lue côté GitHub et la retire de cette seconde source
+- PR clôturées : deux recherches `is:closed`, sur `author:` pour l'histoire de tes PR et \
+`involves:` pour ce qui s'y dit après, dans une requête mesurée à 3 points, sur sa propre \
+cadence. Elles portent déjà `mergedBy` et l'acteur de la fermeture, lu dans la timeline faute de \
+`closedBy`, donc aucune requête de détail n'est nécessaire. `review-requested:` est écartée à la \
+mesure : 357 PR fermées y remontent sur trente jours, presque toutes par du bruit administratif
 - Branches : `GET /repos/{{dépôt}}/activity?actor=` donne qui a poussé, \
 `refs(refPrefix: "refs/heads/")` énumère les branches, `pullRequests(headRefName:)` donne l'état \
 de leurs PR, `Ref.compare` l'écart à la branche par défaut
@@ -143,7 +148,9 @@ restent affichées, et le dernier balayage connu est conservé.
 
 ## Sections
 
-Les premières attendent un geste et comptent dans la pastille de la barre. Les suivantes non.
+Les premières attendent un geste et comptent dans la pastille rouge de la barre. Les suivantes \
+non. Une PR sortie du périmètre ouvert compte à part, dans la pastille violette : les deux sommes \
+valent chacune leur badge, et ne se mélangent jamais.
 
 ### À faire
 
@@ -171,14 +178,20 @@ de l'échange, et un `@toi` dans un bloc de code ou dans une citation n'en est p
 - une review demandée ou une assignation passe devant la mention : elle dit mieux ce qu'on \
 attend. La section « Mentions » ne garde que ce qu'aucune conversation visible ne porte, la \
 description de la PR au premier chef
-- une réaction posée sur un message le sort du compte. `acknowledge_reactions` fixe lesquelles ; \
-`THUMBS_UP` par défaut, pas `EYES`
+- une réaction posée sur un message le sort du compte : un point acté n'attend plus rien. \
+`acknowledge_reactions` fixe lesquelles, 👍 et 👎 par défaut, parce qu'un refus est une réponse. \
+Pas 👀, qui dit qu'on a vu et non qu'on a tranché
 - rien n'est compté deux fois. « À reviewer » cède devant un message en attente, un avis déjà \
 rendu, ou `mergeable: CONFLICTING`. « Mes PR à merger » attend que les messages soient \
 traités. « Mes PR sans reviewer » se tait sur une PR bloquée
-- les pastilles chiffrées d'une ligne somment à sa pastille rouge, les lignes au total de leur \
+- les pastilles chiffrées d'une ligne somment à sa pastille, les lignes au total de leur \
 section, les sections d'action à la pastille de la barre. `_item()` déduit le poids de la \
 décomposition
+- le titre d'une section qui regarde une fenêtre de temps la porte, écrite comme les délais des \
+lignes : deux plus grandes unités consécutives, donc « 1 mois » pour trente jours réglés
+- un compte suivi d'un `+` est un plancher, pas un total : la liste est écrêtée, ou une recherche \
+a buté sur `max_per_search`. Sans `+`, le compte est exact, y compris quand il tombe pile sur le \
+plafond
 - jamais affiché : une PR hors `is:open`, le draft d'un autre, une branche dont la PR est \
 `MERGED` sans commit en avance, une branche avec une PR `OPEN`, la branche par défaut
 
@@ -214,6 +227,11 @@ affiche « figé depuis »
 - `python -m gittodo --print` en texte, `--as <login>` pour la vue d'un collègue
 
 ## Icône de la barre
+
+Deux comptes, deux coins. La pastille rouge, en haut à droite, est ce qu'il reste à faire sur les \
+PR ouvertes. La pastille violette, en bas à gauche, est le suivi des PR qui en sont sorties : les \
+messages restés sans réponse dessus, et les clôtures faites par quelqu'un d'autre que toi, \
+jusqu'à ce que tu ouvres la ligne. Le violet est la couleur dont GitHub colore une PR mergée.
 
 Par défaut, la photo de l'identité observée, une pastille rouge, et un anneau qui se remplit \
 dans le sens horaire jusqu'au prochain cycle. L'anneau s'efface pendant une lecture, où le \
@@ -254,6 +272,8 @@ compte comme un message à traiter, cette section porte le reste",
     "draft": "ta PR est en draft, c'est un choix ; un conflit y est signalé sans devenir une action",
     "orphan_branch": "une branche que tu as poussée porte du travail qu'aucune PR ne soumet",
     "branch_to_delete": "PR `MERGED`, PR `CLOSED` sans merge, ou aucun commit en avance sur la cible",
+    "recently_closed": "une de tes PR est sortie du périmètre ouvert ; la ligne compte en violet \
+tant que tu ne l'as pas ouverte, et jamais si c'est toi qui as clôturé",
 }
 
 

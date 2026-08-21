@@ -87,3 +87,40 @@ query($org:String!, $recent:String!) {
 
 # Activité récente de l'org, pour classer le menu « voir en tant que » (1 point de quota).
 RECENT_ACTIVITY = "is:pr archived:false sort:updated-desc"
+
+
+# Suivi parallèle des PR sorties du périmètre ouvert. Deux recherches seulement : `author:` pour
+# l'histoire de mes PR et l'acteur de leur clôture, `involves:` pour ce qui se dit après. La
+# troisième voie évidente, `review-requested:`, est écartée à la mesure : 357 PR fermées y
+# remontent sur 30 jours, presque toutes par du bruit administratif, et un message qui ne me
+# nomme pas sur une PR que je n'ai jamais touchée n'attend rien de moi.
+CLOSED_SEARCHES = {
+    "mine": "is:pr author:{who} is:closed archived:false sort:updated-desc closed:>={since}",
+    "involved": "is:pr involves:{who} is:closed archived:false sort:updated-desc updated:>={since}",
+}
+
+# `mergedBy` donne l'auteur d'un merge ; une fermeture sans merge n'a pas d'équivalent, son
+# acteur ne s'obtient que par la timeline.
+CLOSED_QUERY = """
+query($mine:String!,$involved:String!,$mine_n:Int!,$involved_n:Int!) {
+  rateLimit { cost remaining }
+  mine: search(query:$mine, type:ISSUE, first:$mine_n) { issueCount nodes { ...Fin } }
+  involved: search(query:$involved, type:ISSUE, first:$involved_n) { issueCount nodes { ...Fin } }
+}
+fragment Fin on PullRequest {
+  id number title url state merged mergedAt closedAt updatedAt
+  headRefName baseRefName
+  repository { nameWithOwner }
+  author { __typename login avatarUrl(size: 64) }
+  mergedBy { login avatarUrl(size: 64) }
+  timelineItems(last: 1, itemTypes: [CLOSED_EVENT]) {
+    nodes { ... on ClosedEvent { createdAt actor { login avatarUrl(size: 64) } } }
+  }
+  comments(last: 6) { totalCount nodes { author { __typename login avatarUrl(size: 64) } createdAt url body
+    reactionGroups { content viewerHasReacted } } }
+  reviewThreads(first: 8) { nodes { id isResolved
+    opener: comments(first:1){ nodes { author { __typename login } } }
+    comments(last: 4) { nodes { author { __typename login avatarUrl(size: 64) } createdAt url body
+      reactionGroups { content viewerHasReacted } } } } }
+}
+"""

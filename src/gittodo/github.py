@@ -9,12 +9,21 @@ import subprocess
 import urllib.error
 import urllib.request
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .config import CONFIG_PATH, Config
-from .models import Branch, Comment, Person, PullRequest, Review, Thread, parse_ts
-from .queries import DIRECT_REVIEW, PEOPLE_QUERY, PR_QUERY, RECENT_ACTIVITY, SEARCHES, SENTINEL_QUERY
+from .models import Branch, Closure, Comment, Person, PullRequest, Review, Thread, parse_ts
+from .queries import (
+    CLOSED_QUERY,
+    CLOSED_SEARCHES,
+    DIRECT_REVIEW,
+    PEOPLE_QUERY,
+    PR_QUERY,
+    RECENT_ACTIVITY,
+    SEARCHES,
+    SENTINEL_QUERY,
+)
 
 API = "https://api.github.com"
 EPOCH = datetime.fromtimestamp(0, tz=timezone.utc)
@@ -458,6 +467,29 @@ class GitHub:
             }
         return ""
 
+    def fetch_closed(self, days: int, mine: int = 20, involved: int = 10) -> tuple[list[Closure], int | None]:
+        """PR sorties du périmètre ouvert, avec l'acteur de leur clôture et ce qui s'est dit depuis.
+
+        Deux recherches suffisent et portent déjà tout : pas d'étape d'hydratation. Mesuré à 3
+        points pour trente jours, ce qui tient sur une cadence lente.
+        """
+        since = (datetime.now(timezone.utc).date() - timedelta(days=max(1, days))).isoformat()
+        variables = {
+            key: self.cfg.scoped(query.replace("{since}", since)) for key, query in CLOSED_SEARCHES.items()
+        }
+        variables["mine_n"] = max(1, min(mine, 50))
+        variables["involved_n"] = max(1, min(involved, 50))
+        data = self.graphql(CLOSED_QUERY, variables)
+        vus: dict[str, Closure] = {}
+        for source in CLOSED_SEARCHES:
+            for node in (data.get(source) or {}).get("nodes") or []:
+                if not node or node.get("state") not in ("MERGED", "CLOSED"):
+                    continue
+                closure = _parse_closure(node, source)
+                if closure is not None:
+                    vus.setdefault(closure.pr.id, closure)
+        return list(vus.values()), (data.get("rateLimit") or {}).get("remaining")
+
     def fetch_notifications(self) -> tuple[list[dict], str]:
         """Boîte des non-lues, paginée : une mention peut être très loin dans la pile.
 
@@ -524,6 +556,64 @@ def _comment(node: dict) -> Comment:
         my_reactions=tuple(
             group["content"] for group in (node.get("reactionGroups") or []) if group.get("viewerHasReacted")
         ),
+    )
+
+
+def _parse_closure(node: dict, source: str) -> Closure | None:
+    """Construit la PR fermée et l'événement de clôture depuis un nœud de recherche.
+
+    L'acteur d'un merge est `mergedBy` ; celui d'une fermeture sans merge n'existe que dans la
+    timeline, `PullRequest` n'ayant pas de `closedBy`.
+    """
+    fin = (node.get("timelineItems") or {}).get("nodes") or []
+    ferme = fin[0] if fin else {}
+    merged = bool(node.get("merged"))
+    acteur = (node.get("mergedBy") or {}) if merged else (ferme.get("actor") or {})
+    quand = parse_ts(node.get("mergedAt") if merged else node.get("closedAt"))
+    if quand is None:
+        return None
+    author, _, author_avatar = _actor(node.get("author"))
+    threads = tuple(
+        Thread(
+            id=t["id"],
+            resolved=bool(t.get("isResolved")),
+            outdated=False,
+            path="",
+            line=None,
+            comments=tuple(_comment(c) for c in ((t.get("comments") or {}).get("nodes") or [])),
+            opener=_actor((((t.get("opener") or {}).get("nodes") or [{}])[0]).get("author"))[0],
+        )
+        for t in ((node.get("reviewThreads") or {}).get("nodes") or [])
+    )
+    comments = tuple(_comment(c) for c in ((node.get("comments") or {}).get("nodes") or []))
+    pr = PullRequest(
+        id=node["id"],
+        repo=node["repository"]["nameWithOwner"],
+        number=node["number"],
+        title=(node.get("title") or "").strip(),
+        url=node["url"],
+        author=author,
+        avatar=author_avatar,
+        is_draft=False,
+        created_at=quand,
+        updated_at=parse_ts(node.get("updatedAt")) or quand,
+        review_decision=None,
+        mergeable=None,
+        ci_state=None,
+        reviewers=(),
+        reviews_count=0,
+        threads=threads,
+        comments=comments,
+        head=node.get("headRefName") or "",
+        base=node.get("baseRefName") or "",
+        sources={source},
+    )
+    return Closure(
+        pr=pr,
+        merged=merged,
+        actor=acteur.get("login") or "",
+        actor_avatar=acteur.get("avatarUrl") or "",
+        at=quand,
     )
 
 

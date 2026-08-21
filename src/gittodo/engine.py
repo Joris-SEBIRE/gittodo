@@ -13,11 +13,11 @@ from __future__ import annotations
 
 import re
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from .config import Config
 from .formatting import join, short_repo, since
-from .models import GROUPS, ORDER, Comment, Item, Kind, PullRequest, parse_ts
+from .models import GROUPS, ORDER, Closure, Comment, Item, Kind, PullRequest, parse_ts
 
 CI_BROKEN = {"FAILURE", "ERROR"}
 CI_OK = {"SUCCESS", None}
@@ -206,8 +206,10 @@ def _item(
     avec l'icône de sa catégorie. Les drapeaux d'état viennent après, sans nombre.
     """
     conflict = pr.mergeable == "CONFLICTING"
-    action = GROUPS[kind].is_action
-    if action and not counted:
+    # Une ligne compte si elle est actionnable, ou si elle relève du suivi des PR clôturées :
+    # celle-là porte son propre badge, le violet.
+    compte = GROUPS[kind].is_action or bool(extra.get("closed"))
+    if compte and not counted:
         counted = ((GROUPS[kind].symbol, 1),)
     numbered = tuple((symbol, str(number)) for symbol, number in counted if number)
     taken = {symbol for symbol, _ in numbered}
@@ -224,7 +226,7 @@ def _item(
         at=at,
         fingerprint=f"{key}:{at.isoformat()}",
         repo=pr.repo,
-        weight=sum(number for _, number in counted) if action else 0,
+        weight=sum(number for _, number in counted) if compte else 0,
         chips=(numbered + flags)[:MAX_CHIPS],
         route=f"{pr.head} → {pr.base}" if pr.head and pr.base else "",
         tag="conflit" if conflict else "",
@@ -232,12 +234,21 @@ def _item(
     )
 
 
-def _messages(pr: PullRequest, me: str, ignored: set[str], acks: set[str]) -> list[Item]:
+def _messages(
+    pr: PullRequest, me: str, ignored: set[str], acks: set[str], since=None, mine_closes: bool = False
+) -> list[Item]:
     """Les messages de la PR, regroupés en une ligne par PR.
 
     Un commentaire de code et un commentaire général sont la même chose : un message. Il
     attend soit ma réponse, soit ma vérification quand c'est une réponse à ce que j'ai
-    ouvert. Le troisième cas — j'ai parlé en dernier — est du suivi, pas une action.
+    ouvert. Le troisième cas, j'ai parlé en dernier, est du suivi, pas une action.
+
+    `since` ne retient que les messages postérieurs à une date, sans cacher le reste aux
+    règles : la citation doit pouvoir retrouver un message d'avant la clôture pour l'acquitter.
+
+    `mine_closes` rend mon dernier message clôturant, même sans citation. La règle de citation
+    protège une demande enterrée par un échange qui continue ; sur une PR fermée plus rien ne
+    continue, et la ligne resterait comptée sans aucun moyen de l'éteindre.
     """
     mine = pr.author == me
 
@@ -262,8 +273,12 @@ def _messages(pr: PullRequest, me: str, ignored: set[str], acks: set[str]) -> li
         # Un fil de code est une conversation : y répondre répond au fil. La discussion générale
         # est une liste plate, où seule une citation dit à quoi on répond.
         pending = (
-            _pending(humans, me, acks, silent) if on_code else _unanswered(humans, me, acks, silent)
+            _pending(humans, me, acks, silent)
+            if on_code or mine_closes
+            else _unanswered(humans, me, acks, silent)
         )
+        if since is not None:
+            pending = [c for c in pending if c.created_at > since]
         if pending:
             # Le fil que j'ai ouvert est à moi de le clore : je lis la réponse puis je résous.
             (to_check if opener == me else to_answer).extend((comment, on_code) for comment in pending)
@@ -515,8 +530,58 @@ def _html_url(api_url: str, repo: str) -> str:
     return f"https://github.com/{repo}/{kind}/{tail[1]}"
 
 
+def closed_items(closures: list[Closure], me: str, cfg: Config) -> list[Item]:
+    """Ce qui reste à faire, et ce qui s'est passé, sur les PR sorties du périmètre ouvert.
+
+    Les messages postérieurs à la clôture repassent par `_messages()` : citation, acquittement
+    par réaction et comptage s'appliquent sans être réécrits. Une clôture faite par quelqu'un
+    d'autre devient une ligne d'histoire. Ce que j'ai clôturé moi-même s'affiche sans compter,
+    puisque je le sais déjà.
+    """
+    ignored, acks = cfg.ignored(), cfg.acknowledged()
+    # L'histoire est bornée par la fenêtre annoncée dans le titre de la section. Un message
+    # tardif, lui, ne l'est pas : la recherche `involves:` porte sur la date de mise à jour, et
+    # une question posée trois mois après un merge attend toujours une réponse.
+    depuis = now() - timedelta(days=max(1, cfg.closed_days))
+    actions: list[Item] = []
+    histoire: list[Item] = []
+    for closure in sorted(closures, key=lambda c: c.at, reverse=True):
+        pr = closure.pr
+        fait = "mergée" if closure.merged else "fermée sans merge"
+        par = f"{fait} par @{closure.actor}" if closure.actor else fait
+        for item in _messages(pr, me, ignored, acks, since=closure.at, mine_closes=True):
+            # « J'ai parlé en dernier » n'est pas une information sur une PR fermée : personne
+            # n'y répondra plus.
+            if item.kind is Kind.WAITING_REPLY:
+                continue
+            actions.append(replace(item, closed=True, detail=join(item.detail, par)))
+        if pr.author != me or closure.at < depuis:
+            continue  # l'histoire, c'est celle de mes PR, dans la fenêtre annoncée
+        histoire.append(
+            _item(
+                pr,
+                Kind.RECENTLY_CLOSED,
+                pr.id,
+                closure.at,
+                note=par,
+                avatar=closure.actor_avatar or pr.avatar,
+                hint=f"{par} le {closure.at:%d/%m à %H:%M}",
+                closed=True,
+                counted=((GROUPS[Kind.RECENTLY_CLOSED].symbol, 0 if closure.actor == me else 1),),
+            )
+        )
+    # Aucun écrêtage ici : le plafond est un plafond d'affichage, tenu par le menu, qui sait
+    # alors dire qu'il en reste. Le compte, lui, porte tout ce qui est arrivé.
+    return actions + histoire
+
+
 def build_items(
-    prs: list[PullRequest], notifications: list[dict], me: str, cfg: Config, branches: list | None = None
+    prs: list[PullRequest],
+    notifications: list[dict],
+    me: str,
+    cfg: Config,
+    branches: list | None = None,
+    closures: list | None = None,
 ) -> list[Item]:
     ignored = cfg.ignored()
     items: list[Item] = []
@@ -536,11 +601,16 @@ def build_items(
         items += _mention_items(notifications, covered, me)
     if cfg.show_branches and branches:
         items += branch_items(branches)
+    if cfg.show_closed and closures:
+        items += closed_items(closures, me, cfg)
     if not cfg.show_waiting:
         items = [i for i in items if i.group.is_action]
-    # Règle unique qui garantit l'égalité « somme des lignes = badge de la barre » :
-    # seules les lignes actionnables comptent.
-    items = [item if item.group.is_action else replace(item, weight=0) for item in items]
+    # Deux invariants, un par badge : la somme des pastilles rouges vaut le badge rouge, celle
+    # des violettes le badge violet. Une ligne informative ne compte dans aucun des deux, sauf
+    # l'histoire des clôtures, qui porte son propre compte jusqu'à ce qu'on l'ouvre.
+    items = [
+        item if (item.group.is_action or item.closed) else replace(item, weight=0) for item in items
+    ]
     rank = {kind: index for index, kind in enumerate(ORDER)}
     items.sort(key=lambda i: (rank[i.kind], -i.at.timestamp()))
     return _dedupe(items)
@@ -558,9 +628,14 @@ def _dedupe(items: list[Item]) -> list[Item]:
 
 
 def summarize(items: list[Item]) -> tuple[int, bool]:
-    """Somme des notifications actionnables et présence d'au moins une urgence."""
-    actions = [i for i in items if i.group.is_action]
+    """Somme des notifications actionnables sur PR ouvertes, et présence d'une urgence."""
+    actions = [i for i in items if i.group.is_action and not i.closed]
     return sum(i.weight for i in actions), any(i.is_urgent for i in actions)
+
+
+def summarize_closed(items: list[Item]) -> int:
+    """Somme du suivi des PR sorties du périmètre : c'est le badge violet."""
+    return sum(i.weight for i in items if i.closed)
 
 
 def now() -> datetime:

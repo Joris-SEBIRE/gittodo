@@ -58,10 +58,10 @@ from . import branches, launchagent
 from . import help as manual
 from .avatars import BAR_SIZE, SIZE as AVATAR_SIZE, Avatars
 from .config import CONFIG_PATH, Config
-from .engine import build_items, now, summarize
-from .formatting import ago, countdown, join, since, truncate
+from .engine import build_items, now, summarize, summarize_closed
+from .formatting import ago, countdown, join, since, spell, truncate
 from .github import GitHub, GitHubError, service_status, signature_of
-from .models import GROUPS, ORDER, Item, Person, Snapshot
+from .models import GROUPS, ORDER, Item, Kind, Person, Snapshot
 from .state import State, acquire_single_instance, log_error, write_status
 
 BUNDLE_ID = "fr.jsebire.gittodo"
@@ -93,6 +93,10 @@ GLYPH_HEADER = 12.0
 # Icônes de chrome (titres de section, pied de menu) : petites et en trait fin. Elles repèrent
 # la ligne sans venir concurrencer son texte.
 CHROME_GLYPH = 11.0
+# Remontée optique des icônes de chrome. AppKit centre la boîte de l'image dans la ligne, alors
+# que l'encre d'un texte en capitales monte plus haut qu'elle ne descend : mesuré au pixel sur le
+# menu réel, l'icône tombait 0,75 à 2,25 pt sous le centre visuel du titre.
+CHROME_LIFT = 1.75
 # Marge de gauche commune aux icônes de chrome et aux vignettes des lignes : la même constante
 # pour les deux, sinon les deux colonnes se désaligneraient au premier réglage de l'une.
 LEFT_MARGIN = 6.0
@@ -112,6 +116,7 @@ SOURCES = {
     "notifications": ("boîte des non-lues", "une mention peut manquer"),
     "mentions": ("sujets des mentions", "une mention fermée peut rester affichée"),
     "branches": ("branches distantes", "les branches peuvent être périmées"),
+    "closed": ("suivi des PR clôturées", "une clôture ou un message tardif peut manquer"),
     "people": ("annuaire de l'organisation", "« voir en tant que » est incomplet"),
 }
 # Triangle d'avertissement posé à la place de la pastille de comptage : le rouge de la pastille
@@ -209,6 +214,11 @@ def _boxed_symbol(name: str, size: float = AVATAR_SIZE, tinted: bool = False):
 _CHROME: dict[str, object] = {}
 
 
+def _capped(count, more: bool) -> str:
+    """Un compte, suivi d'un « + » quand il touche son plafond et qu'il en reste derrière."""
+    return f"{count}+" if more else str(count)
+
+
 def _chrome_symbol(name: str):
     """Symbole de chrome : trait fin, petite taille, précédé de la marge de gauche.
 
@@ -226,10 +236,14 @@ def _chrome_symbol(name: str):
             )
         )
         span = thin.size()
-        canvas = NSImage.alloc().initWithSize_(NSMakeSize(span.width + LEFT_MARGIN, span.height))
+        # Image plus haute que le glyphe, glyphe dessiné vers le haut : centrer cette image
+        # revient à remonter le glyphe de CHROME_LIFT.
+        canvas = NSImage.alloc().initWithSize_(
+            NSMakeSize(span.width + LEFT_MARGIN, span.height + 2 * CHROME_LIFT)
+        )
         canvas.lockFocus()
         thin.drawInRect_fromRect_operation_fraction_(
-            NSMakeRect(LEFT_MARGIN, 0, span.width, span.height),
+            NSMakeRect(LEFT_MARGIN, 2 * CHROME_LIFT, span.width, span.height),
             NSZeroRect,
             NSCompositingOperationSourceOver,
             1.0,
@@ -243,21 +257,21 @@ def _chrome_symbol(name: str):
 _LABELS: dict[tuple, object] = {}
 
 
-def _red_label(text: str, height: float, radius: float, padding: float, font: float = LABEL_FONT):
-    """Texte blanc sur fond rouge : la seule chose d'une ligne qui doive crier.
+def _red_label(text: str, height: float, radius: float, padding: float, font: float = LABEL_FONT, tint: str = "systemRedColor"):
+    """Texte blanc sur fond plein : la seule chose d'une ligne qui doive crier.
 
     Dessiné en image plutôt qu'en texte coloré, parce que c'est le fond qui le rend
     repérable d'un coup d'œil dans une liste, comme les labels de GitHub. Une seule
     primitive pour l'étiquette de texte et pour la pastille de comptage, à la géométrie près.
     """
-    key = (text, height, radius, padding, font)
+    key = (text, height, radius, padding, font, tint)
     if key not in _LABELS:
         glyph = _run(text, font, color=NSColor.whiteColor(), weight=NSFontWeightSemibold)
         measured = glyph.size()
         width = max(height, measured.width + padding)
         canvas = NSImage.alloc().initWithSize_(NSMakeSize(width, height))
         canvas.lockFocus()
-        NSColor.systemRedColor().setFill()
+        getattr(NSColor, tint)().setFill()
         NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
             NSMakeRect(0, 0, width, height), radius, radius
         ).fill()
@@ -267,7 +281,54 @@ def _red_label(text: str, height: float, radius: float, padding: float, font: fl
     return _LABELS[key]
 
 
-def _with_count(base, count: str, size: float):
+# Violet, comme GitHub colore une PR mergée : distinct du rouge des actions et du jaune ou de
+# l'orange des avertissements, et il ne disparaît pas sur une ligne survolée en bleu.
+CLOSED_TINT = "systemPurpleColor"
+
+
+def _count_pill(count: str, tint: str):
+    return _red_label(count, COUNT_HEIGHT, COUNT_RADIUS, COUNT_PADDING, COUNT_FONT, tint)
+
+
+def _bar_image(face, red: str, purple: str, size: float):
+    """Photo, compte rouge en haut à droite, compte violet en bas à gauche.
+
+    Deux comptes qui ne se mélangent jamais : le rouge est ce qu'il y a à faire sur les PR
+    ouvertes, le violet ce que deviennent celles qui en sont sorties. Chacun déborde de son
+    côté, donc l'élément s'élargit quand l'un apparaît.
+    """
+    if face is None:
+        return None
+    droite = _count_pill(red, "systemRedColor") if red else None
+    gauche = _count_pill(purple, CLOSED_TINT) if purple else None
+    if droite is None and gauche is None:
+        return face
+    inner = face.size().width
+    marge_d = droite.size().width - COUNT_OVERLAP if droite else 0.0
+    marge_g = gauche.size().width - COUNT_OVERLAP if gauche else 0.0
+    canvas = NSImage.alloc().initWithSize_(NSMakeSize(marge_g + inner + marge_d, size))
+    canvas.lockFocus()
+    face.drawInRect_fromRect_operation_fraction_(
+        NSMakeRect(marge_g, 0, inner, size), NSZeroRect, NSCompositingOperationSourceOver, 1.0
+    )
+    if droite is not None:
+        span = droite.size()
+        droite.drawInRect_fromRect_operation_fraction_(
+            NSMakeRect(canvas.size().width - span.width, size - span.height, span.width, span.height),
+            NSZeroRect,
+            NSCompositingOperationSourceOver,
+            1.0,
+        )
+    if gauche is not None:
+        span = gauche.size()
+        gauche.drawInRect_fromRect_operation_fraction_(
+            NSMakeRect(0, 0, span.width, span.height), NSZeroRect, NSCompositingOperationSourceOver, 1.0
+        )
+    canvas.unlockFocus()
+    return canvas
+
+
+def _with_count(base, count: str, size: float, tint: str = "systemRedColor"):
     """Pastille de comptage en débord à droite de l'image, façon badge d'application.
 
     En débord plutôt que posée dessus : elle ne cache alors aucun visage, et la largeur
@@ -275,7 +336,7 @@ def _with_count(base, count: str, size: float):
     """
     if base is None or not count:
         return base
-    pill = _red_label(count, COUNT_HEIGHT, COUNT_RADIUS, COUNT_PADDING, COUNT_FONT)
+    pill = _count_pill(count, tint)
     span = pill.size()
     inner = base.size().width
     width = inner + span.width - COUNT_OVERLAP
@@ -348,6 +409,23 @@ def _with_ring(face, fraction: float, size: float = RING_SIZE):
         canvas.unlockFocus()
 
     NSApplication.sharedApplication().effectiveAppearance().performAsCurrentDrawingAppearance_(paint)
+    return canvas
+
+
+def _spinner_image(frame: str, size: float):
+    """Compteur animé dessiné dans la même boîte que l'anneau, pour que l'élément ne saute pas.
+
+    En gabarit : la barre des menus le teinte alors comme son texte, clair ou sombre.
+    """
+    glyph = NSAttributedString.alloc().initWithString_attributes_(
+        frame, {NSFontAttributeName: NSFont.monospacedDigitSystemFontOfSize_weight_(13.0, NSFontWeightMedium)}
+    )
+    span = glyph.size()
+    canvas = NSImage.alloc().initWithSize_(NSMakeSize(size, size))
+    canvas.lockFocus()
+    glyph.drawAtPoint_(((size - span.width) / 2, (size - span.height) / 2))
+    canvas.unlockFocus()
+    canvas.setTemplate_(True)
     return canvas
 
 
@@ -452,7 +530,7 @@ def _row_image(content, size: float = AVATAR_SIZE):
     return _padded(content)
 
 
-def _face(avatars, urls, symbol: str, count: str = "", size: float = AVATAR_SIZE):
+def _face(avatars, urls, symbol: str, count: str = "", size: float = AVATAR_SIZE, tint: str = "systemRedColor"):
     """Vignette de gauche : les personnes concernées, et le compte de ce qu'elles attendent.
 
     Plusieurs personnes sur une même action donnent une pile décalée, la première à avoir
@@ -463,7 +541,7 @@ def _face(avatars, urls, symbol: str, count: str = "", size: float = AVATAR_SIZE
         urls = (urls,)
     faces = [image for image in (avatars.image(url, size) for url in tuple(urls)[:STACK_MAX] if url) if image]
     base = _stack(faces, size) or _boxed_symbol(symbol, size, tinted=bool(count))
-    return _padded(_with_count(base, count, size))
+    return _padded(_with_count(base, count, size, tint))
 
 
 def _attachment(image, offset: float):
@@ -601,6 +679,8 @@ class GitTodoApp(NSObject):
         self.notifications: list = []
         self.notifications_at = None
         self.notifications_limit = ""
+        self.closures: list = []
+        self.closures_at = None
         # Sources actuellement dégradées : le triangle et sa section en vivent.
         self.health: dict[str, dict] = {}
         # Dernière gravité annoncée par GitHub, et quand on l'a demandée.
@@ -650,6 +730,30 @@ class GitTodoApp(NSObject):
             self.repaint_ring()
         if self.countdown() <= 0:
             self.start_fetch()
+
+    @objc.python_method
+    def read_closures(self) -> list:
+        """PR sorties du périmètre ouvert, relues sur leur propre cadence.
+
+        Deux recherches mesurées à 3 points : trop cher pour le cycle de 20 s, dérisoire toutes
+        les cinq minutes. Le dernier résultat sert entre deux passages.
+        """
+        if not self.cfg.show_closed:
+            self.closures, self.closures_at = [], None
+            self.clear_incident("closed")
+            return []
+        age = None if self.closures_at is None else (now() - self.closures_at).total_seconds()
+        if age is not None and age < max(20, self.cfg.closed_refresh_seconds):
+            return self.closures
+        try:
+            found, _ = self.client.fetch_closed(self.cfg.closed_days)
+        except GitHubError as exc:
+            log_error(f"suivi des clôturées ignoré : {type(exc).__name__}: {exc}")
+            self.note_incident("closed", exc)
+            return self.closures
+        self.clear_incident("closed")
+        self.closures, self.closures_at = found, now()
+        return found
 
     @objc.python_method
     def note_incident(self, source: str, trouble, kind: str = "") -> None:
@@ -829,13 +933,9 @@ class GitTodoApp(NSObject):
     def draw_spinner(self) -> None:
         button = self.status_item.button()
         self.status_item.setLength_(NSVariableStatusItemLength)
-        button.setImage_(None)
-        button.setAttributedTitle_(
-            NSAttributedString.alloc().initWithString_attributes_(
-                SPINNER_FRAMES[self.spinner_frame],
-                {NSFontAttributeName: NSFont.monospacedDigitSystemFontOfSize_weight_(13.0, NSFontWeightMedium)},
-            )
-        )
+        span = RING_SIZE if self.cfg.show_refresh_ring else BAR_SIZE
+        button.setImage_(_spinner_image(SPINNER_FRAMES[self.spinner_frame], span))
+        self.set_title("")
         who = f" en tant que @{self.snapshot.identity}" if self.snapshot.impersonating else ""
         button.setToolTip_(f"GitTodo — chargement{who}…")
 
@@ -851,10 +951,15 @@ class GitTodoApp(NSObject):
         """Prend en compte une édition de config.json sans relancer l'app."""
         mtime = self.config_mtime()
         if mtime and mtime != self.cfg_mtime:
+            avant = (self.cfg.closed_days, self.cfg.show_closed)
             self.cfg = Config.load()
             self.client.cfg = self.cfg
             self.state.scope = self.cfg.view_as or ""
             self.cfg_mtime = mtime
+            if avant != (self.cfg.closed_days, self.cfg.show_closed):
+                # Le titre de la section annonce la fenêtre réglée : son contenu doit suivre
+                # tout de suite, sans attendre la cadence lente.
+                self.closures_at = None
 
     @objc.python_method
     def _fetch_worker(self) -> None:
@@ -913,8 +1018,9 @@ class GitTodoApp(NSObject):
                 truncated = truncated + [self.notifications_limit]
             self.clear_incident("pull_requests")
             self.ask_service()
+            closures = self.read_closures()
             snapshot = Snapshot(
-                items=build_items(prs, notifications, identity, self.cfg, self.branches),
+                items=build_items(prs, notifications, identity, self.cfg, self.branches, closures),
                 viewer=viewer,
                 identity=identity,
                 fetched_at=now(),
@@ -1093,7 +1199,24 @@ class GitTodoApp(NSObject):
 
     @objc.python_method
     def visible(self) -> list[Item]:
-        return self.state.visible(self.snapshot.items)
+        """Ce que le menu montre, avec le suivi des clôturées déjà lues ramené à zéro.
+
+        Au premier passage, tout l'historique est marqué ouvert : sinon un mois de clôtures
+        arriverait d'un coup comme autant de nouveautés.
+        """
+        items = self.state.visible(self.snapshot.items)
+        # Seule l'histoire s'éteint au clic. Un message resté sans réponse sur une PR fermée
+        # attend toujours quelque chose de moi : il ne s'éteint qu'une fois répondu ou acquitté,
+        # comme sur une PR ouverte.
+        histoire = [item for item in items if item.kind is Kind.RECENTLY_CLOSED]
+        if histoire and not self.state.knows_closed():
+            self.state.mark_opened(histoire)
+        return [
+            replace(item, weight=0)
+            if item.kind is Kind.RECENTLY_CLOSED and self.state.is_opened(item)
+            else item
+            for item in items
+        ]
 
     # --- barre des menus ------------------------------------------------
 
@@ -1106,11 +1229,16 @@ class GitTodoApp(NSObject):
             self.status_item.setVisible_(True)
             write_status({"chargement": True, "identite": self.snapshot.identity, **self.geometry()})
             return
-        count, urgent = summarize(self.visible())
-        badge = str(count) if count else ""
+        lignes = self.visible()
+        count, urgent = summarize(lignes)
+        suivi = summarize_closed(lignes)
+        # Une recherche écrêtée rend le compte inférieur à la réalité : le « + » le dit.
+        badge = _capped(count, bool(self.snapshot.truncated)) if count else ""
         shown = self.draw_badge(count, urgent, badge)
         who = f" (vu en tant que @{self.snapshot.identity})" if self.snapshot.impersonating else ""
         tip = f"GitTodo — {count} chose(s) à faire{who}" if count else f"GitTodo — rien à faire{who}"
+        if suivi:
+            tip += f", {suivi} sur des PR clôturées"
         if self.snapshot.error:
             # L'erreur n'encombre pas la pastille : elle est dans le survol et dans le menu.
             tip = f"GitTodo — {truncate(self.snapshot.error, 80)}"
@@ -1124,6 +1252,7 @@ class GitTodoApp(NSObject):
                 "visible": visible,
                 "identite": self.snapshot.identity,
                 "actions": count,
+                "suivi_closes": suivi,
                 "erreur": self.snapshot.error,
                 "figé": self.is_frozen(),
                 "branches": len(self.branches),
@@ -1142,7 +1271,7 @@ class GitTodoApp(NSObject):
         Passer par `render()` réécrirait le fichier d'état à chaque seconde, pour une image qui
         change d'un degré.
         """
-        if self.status_item is None or self.loading() or self.health:
+        if self.status_item is None or self.loading():
             return
         count, urgent = summarize(self.visible())
         self.draw_badge(count, urgent, str(count) if count else "")
@@ -1154,13 +1283,16 @@ class GitTodoApp(NSObject):
         if self.cfg.badge_style == "avatar":
             photo = self.avatars.image(self.person_for(self.snapshot.identity).avatar, BAR_SIZE)
             if photo is not None:
-                # L'anneau ne dit quelque chose que si le cycle tourne : pendant une lecture le
-                # compteur animé prend le relais, et en panne le décompte n'a plus de sens.
-                ring = self.cfg.show_refresh_ring and not self.health and not self.fetching
+                # L'anneau est dessiné dès qu'il est activé, même vide : le faire disparaître
+                # changerait la largeur de l'élément, et l'icône sauterait à chaque cycle.
+                ring = self.cfg.show_refresh_ring
                 base = _with_ring(photo, self.progress()) if ring else photo
                 span = RING_SIZE if ring else BAR_SIZE
+                suivi = summarize_closed(self.visible())
                 portrait = (
-                    _with_alert(base, span, self.level()) if self.health else _with_count(base, badge, span)
+                    _with_alert(base, span, self.level())
+                    if self.health
+                    else _bar_image(base, badge, str(suivi) if suivi else "", span)
                 )
                 # Longueur variable : macOS ajoute 16 pt de marge à la longueur demandée,
                 # donc imposer une largeur ne fait que l'élargir.
@@ -1175,7 +1307,7 @@ class GitTodoApp(NSObject):
                         "github": self.service[1],
                         "degrade": sorted(self.health),
                     }
-                return {"rendu": "photo + pastille", "badge": badge}
+                return {"rendu": "photo + pastille", "badge": badge, "violet": str(suivi) if suivi else ""}
         self.status_item.setLength_(NSVariableStatusItemLength)
         if self.health:
             # Sans photo, l'avertissement devient l'icône elle-même, et le nombre disparaît :
@@ -1342,31 +1474,51 @@ class GitTodoApp(NSObject):
         menu.addItem_(NSMenuItem.separatorItem())
 
     @objc.python_method
+    def window_of(self, kind) -> str:
+        """Fenêtre de temps d'une section, lue dans les réglages à chaque affichage.
+
+        Le libellé suit donc le paramétrage : changer la profondeur du suivi change le titre,
+        sans qu'aucune constante ne soit à mettre à jour ailleurs. La durée s'écrit avec la
+        même fonction que les délais des lignes, pour que l'app ne parle qu'une seule langue.
+        """
+        fenetres = {Kind.RECENTLY_CLOSED: self.cfg.closed_days * 86400}
+        secondes = fenetres.get(kind, 0)
+        return spell(secondes) if secondes else ""
+
+    @objc.python_method
     def add_group(self, menu, kind, items: list[Item]) -> None:
         if not items:
             return
         group = GROUPS[kind]
         if menu.numberOfItems():
             menu.addItem_(NSMenuItem.separatorItem())
-        # Les sections actionnables affichent leur somme de notifications, pas leur nombre
-        # de lignes : c'est ce total qui s'additionne jusqu'au badge de la barre.
-        total = sum(item.weight for item in items) if group.is_action else len(items)
+        plafond = max(1, self.cfg.closed_history_rows if kind is Kind.RECENTLY_CLOSED else MAX_ROWS_PER_GROUP)
+        montrees = items[:plafond]
+        # Le compte porte sur ce qui est affiché, et un « + » dit qu'il en reste derrière : un
+        # nombre à son plafond ne le dit pas de lui-même. Les sections actionnables comptent
+        # leurs notifications, pas leurs lignes, parce que c'est ce total qui monte jusqu'au badge.
+        total = sum(item.weight for item in montrees) if group.is_action else len(montrees)
         header = NSMenuItem.alloc().init()
-        header.setAttributedTitle_(_header(f"{group.label.upper()} ({total})"))
+        # La fenêtre reste en minuscules : seul le libellé est capitalisé, une unité criée se
+        # lit mal.
+        fenetre = self.window_of(kind)
+        titre = group.label.upper() + (f" · {fenetre}" if fenetre else "")
+        header.setAttributedTitle_(_header(f"{titre} ({_capped(total, len(items) > plafond)})"))
         header.setImage_(_chrome_symbol(group.symbol))
         header.setEnabled_(False)
         menu.addItem_(header)
-        for item in items[:MAX_ROWS_PER_GROUP]:
+        for item in montrees:
             self.add_row(menu, item)
-        if len(items) > MAX_ROWS_PER_GROUP:
-            self.add_info(menu, f"{len(items) - MAX_ROWS_PER_GROUP} de plus, non affichés", "ellipsis")
+        if len(items) > plafond:
+            self.add_info(menu, f"{len(items) - plafond} de plus, non affichés", "ellipsis")
 
     @objc.python_method
     def add_row(self, menu, item: Item) -> None:
         self.rows[item.id] = item
         count = str(item.weight) if item.weight else ""
         people = item.faces or (item.avatar,)
-        face = _face(self.avatars, people, item.group.symbol, count)
+        tint = CLOSED_TINT if item.closed else "systemRedColor"
+        face = _face(self.avatars, people, item.group.symbol, count, tint=tint)
         # Les variantes ⌥ et ⌘ ne portent pas le compte : ce n'est pas ce qu'elles font.
         plain = _face(self.avatars, people, item.group.symbol) if count else face
         row = self.row_item(
@@ -1531,6 +1683,10 @@ class GitTodoApp(NSObject):
         if item := self.row_of(sender):
             NSWorkspace.sharedWorkspace().openURL_(NSURL.URLWithString_(item.url))
             self.state.mark_seen([item])
+            if item.kind is Kind.RECENTLY_CLOSED:
+                # L'histoire se compte jusqu'au clic, et pas jusqu'à un coup d'oeil au menu :
+                # c'est l'ouverture qui vaut lecture.
+                self.state.mark_opened([item])
             self.render()
 
     def dismissItem_(self, sender):

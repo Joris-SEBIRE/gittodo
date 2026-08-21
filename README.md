@@ -94,8 +94,13 @@ pour elle.
 - **⌘** maintenu : la ligne devient « Copier le lien ».
 - **⌘R** : actualise tout de suite.
 - Le point ● marque ce qui est arrivé depuis la dernière ouverture du menu.
+- Un compte suivi d'un `+` est un plancher : la liste est écrêtée, ou une recherche a buté sur sa
+  limite. Sans `+`, le compte est exact, même s'il tombe pile sur le plafond.
 - Un anneau se remplit autour de la photo, dans le sens horaire, jusqu'au prochain cycle : le
   délai avant la prochaine lecture se voit sans ouvrir le menu.
+- Une pastille violette en bas à gauche de la photo suit les PR sorties du périmètre ouvert :
+  messages restés sans réponse dessus, et clôtures faites par quelqu'un d'autre. Elle décompte
+  quand tu ouvres la ligne. La pastille rouge, en haut à droite, ne concerne que les PR ouvertes.
 
 Le menu se met à jour pendant qu'il est ouvert, sans qu'il faille le refermer.
 

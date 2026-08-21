@@ -202,6 +202,12 @@ notifications. Toutes les vignettes font la même largeur, sinon les titres ne s
 plus d'une ligne à l'autre. Puis le titre de la PR. Puis des métadonnées constantes : dépôt et numéro, auteur, délai, pastilles d'état. Puis \
 `headRefName → baseRefName`, qui révèle les PR empilées.
 
+Le délai et les pastilles chiffrées prennent la couleur de la pastille de la ligne — rouge pour \
+ce qu'il reste à faire, violet pour le suivi des PR clôturées — et restent gris sur une ligne qui \
+ne compte rien. Les drapeaux d'état, eux, ne comptent rien et gardent leur gris. Le délai est \
+l'information qu'on cherche en premier sur une ligne qui attend ; les pastilles chiffrées disent \
+de quoi son compte est fait.
+
 L'étiquette rouge `conflit` marque un `mergeable: CONFLICTING`. Le survol détaille le compte.
 
 Clic : ouvrir au bon endroit. **⌥** : masquer jusqu'à la prochaine activité, en local. **⌘** : \

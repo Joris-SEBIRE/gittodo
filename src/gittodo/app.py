@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import sys
 import threading
 import traceback
@@ -148,6 +149,12 @@ CODES = {
     "réseau": "réseau injoignable",
     "erreur": "erreur",
 }
+# Séparateur des métadonnées, et ce qui, dedans, est un délai. C'est le segment que l'œil
+# cherche en premier sur une ligne qui attend : il prend la couleur de la pastille de la ligne,
+# pour que le compte et l'ancienneté se lisent d'un même coup d'œil.
+META_SEPARATOR = " · "
+DELAY = re.compile(r"^(?:depuis |il y a )|^à l'instant$")
+
 # Respiration entre la vignette et le texte : le titre d'un élément de menu démarre juste après
 # la colonne d'image, sans marge propre, et les avatars y touchaient presque les lettres.
 FACE_GAP = 3.0
@@ -554,23 +561,35 @@ def _attachment(image, offset: float):
     return piece
 
 
-def _chip_run(chips):
-    """Pastilles d'état inline : icône SF + nombre, dans la couleur secondaire du thème.
+def _chip_run(chips, tint: str | None = None):
+    """Pastilles d'état inline : icône SF + nombre.
 
-    La configuration de palette laisse AppKit résoudre la couleur au dessin, donc les
-    icônes suivent le passage clair/sombre sans être recalculées.
+    Celles qui portent un nombre décomposent la pastille de la ligne : elles prennent sa
+    couleur, glyphe et nombre ensemble, pour qu'on voie du premier coup d'œil de quoi le compte
+    est fait. Les drapeaux d'état, eux, restent dans le gris des métadonnées.
+
+    La configuration de palette laisse AppKit résoudre la couleur au dessin, donc les icônes
+    suivent le passage clair/sombre sans être recalculées.
     """
+    grey = NSColor.secondaryLabelColor()
+    accent = getattr(NSColor, tint)() if tint else None
     run = NSMutableAttributedString.alloc().init()
     for name, label in chips:
         image = _symbol(name, GLYPH_CHIP)
         if image is None:
             continue
+        colour = accent if label and accent is not None else grey
         tinted = image.imageWithSymbolConfiguration_(
-            NSImageSymbolConfiguration.configurationWithPaletteColors_([NSColor.secondaryLabelColor()])
+            NSImageSymbolConfiguration.configurationWithPaletteColors_([colour])
         )
         run.appendAttributedString_(_attachment(tinted, -1.0))
         run.appendAttributedString_(
-            _run((f" {label}" if label else "") + "   ", META_FONT, color=NSColor.secondaryLabelColor())
+            _run(
+                (f" {label}" if label else "") + "   ",
+                META_FONT,
+                color=colour,
+                weight=NSFontWeightMedium if label and accent is not None else None,
+            )
         )
     return run
 
@@ -589,7 +608,43 @@ def _run(text: str, size: float, color=None, weight=None, paragraph=None):
     return NSAttributedString.alloc().initWithString_attributes_(text, attributes)
 
 
-def _rich(title: str, detail: str, is_new: bool = False, chips=(), route: str = "", tag: str = ""):
+def _meta_run(detail: str, tint: str | None, lead: str, trailing: str, paragraph):
+    """Métadonnées, avec le délai teinté de la couleur de la pastille quand il y en a une.
+
+    Le reste de la ligne, séparateurs compris, garde le gris des métadonnées : c'est le
+    contraste avec ce gris qui fait ressortir l'ancienneté, pas la couleur en elle-même.
+    """
+    grey = NSColor.secondaryLabelColor()
+    accent = getattr(NSColor, tint)() if tint else None
+    run = NSMutableAttributedString.alloc().init()
+    for index, part in enumerate(truncate(detail, DETAIL_WIDTH).split(META_SEPARATOR)):
+        run.appendAttributedString_(
+            _run(lead if index == 0 else META_SEPARATOR, META_FONT, color=grey, paragraph=paragraph)
+        )
+        marked = accent is not None and DELAY.search(part) is not None
+        run.appendAttributedString_(
+            _run(
+                part,
+                META_FONT,
+                color=accent if marked else grey,
+                weight=NSFontWeightMedium if marked else None,
+                paragraph=paragraph,
+            )
+        )
+    if trailing:
+        run.appendAttributedString_(_run(trailing, META_FONT, color=grey, paragraph=paragraph))
+    return run
+
+
+def _rich(
+    title: str,
+    detail: str,
+    is_new: bool = False,
+    chips=(),
+    route: str = "",
+    tag: str = "",
+    tint: str | None = None,
+):
     """Ligne complète : titre, ligne de métadonnées, puis trajet de branche.
 
     Trois niveaux de lecture, toujours dans le même ordre et les mêmes tailles, pour que
@@ -612,15 +667,10 @@ def _rich(title: str, detail: str, is_new: bool = False, chips=(), route: str = 
             text.appendAttributedString_(_run("\n", META_FONT, paragraph=paragraph))
             text.appendAttributedString_(_attachment(_red_label(tag, TAG_HEIGHT, TAG_RADIUS, TAG_PADDING), -2.0))
         text.appendAttributedString_(
-            _run(
-                ("  " if tag else "\n") + truncate(detail, DETAIL_WIDTH) + ("   " if chips else ""),
-                META_FONT,
-                color=NSColor.secondaryLabelColor(),
-                paragraph=paragraph,
-            )
+            _meta_run(detail, tint, "  " if tag else "\n", "   " if chips else "", paragraph)
         )
     if chips:
-        text.appendAttributedString_(_chip_run(chips))
+        text.appendAttributedString_(_chip_run(chips, tint))
     if route:
         text.appendAttributedString_(
             _run(
@@ -1464,7 +1514,7 @@ class GitTodoApp(NSObject):
             kind = trouble["kind"]
             code = f"HTTP {trouble['status']}" if trouble.get("status") else CODES.get(kind, kind)
             row = self.row_item(
-                _rich(f"{label} : {code}", join(effet, since(trouble["since"]))),
+                _rich(f"{label} : {code}", join(effet, since(trouble["since"])), tint=LEVELS[level][1]),
                 "openStatus:",
                 source,
                 badge,
@@ -1522,7 +1572,15 @@ class GitTodoApp(NSObject):
         # Les variantes ⌥ et ⌘ ne portent pas le compte : ce n'est pas ce qu'elles font.
         plain = _face(self.avatars, people, item.group.symbol) if count else face
         row = self.row_item(
-            _rich(item.title, item.detail, self.state.is_new(item), item.chips, item.route, item.tag),
+            _rich(
+                item.title,
+                item.detail,
+                self.state.is_new(item),
+                item.chips,
+                item.route,
+                item.tag,
+                tint if count else None,
+            ),
             "openItem:",
             item.id,
             face,

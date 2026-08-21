@@ -94,6 +94,9 @@ pour elle.
 - **⌘** maintenu : la ligne devient « Copier le lien ».
 - **⌘R** : actualise tout de suite.
 - Le point ● marque ce qui est arrivé depuis la dernière ouverture du menu.
+- Le délai « depuis X » et les pastilles chiffrées prennent la couleur de la pastille de la
+  ligne : rouge pour ce qu'il reste à faire, violet pour le suivi des PR clôturées, gris quand la
+  ligne ne compte rien. Les drapeaux d'état restent gris, ils ne comptent rien.
 - Un compte suivi d'un `+` est un plancher : la liste est écrêtée, ou une recherche a buté sur sa
   limite. Sans `+`, le compte est exact, même s'il tombe pile sur le plafond.
 - Un anneau se remplit autour de la photo, dans le sens horaire, jusqu'au prochain cycle : le

@@ -55,7 +55,7 @@ from Cocoa import (
 )
 from PyObjCTools import AppHelper
 
-from . import branches, launchagent
+from . import IDENTITY_TINT, branches, launchagent
 from . import help as manual
 from .avatars import BAR_SIZE, SIZE as AVATAR_SIZE, Avatars
 from .config import CONFIG_PATH, Config
@@ -130,6 +130,8 @@ RING_SIZE = 21.0
 RING_WIDTH = 1.5
 # Le remplissage avance par pas d'une seconde : inutile de redessiner plus souvent que le tic.
 RING_STEPS = 60
+# Dilution de la gouttière de l'anneau, sous la portion déjà écoulée.
+RING_TRACK_ALPHA = 0.28
 # Trois niveaux, du moins au plus grave, avec le mot qui titre la section et la couleur du
 # triangle. Le niveau croise nos propres échecs et la gravité annoncée par GitHub.
 LEVELS = {
@@ -226,14 +228,18 @@ def _capped(count, more: bool) -> str:
     return f"{count}+" if more else str(count)
 
 
-def _chrome_symbol(name: str):
+def _chrome_symbol(name: str, tint: str = ""):
     """Symbole de chrome : trait fin, petite taille, précédé de la marge de gauche.
 
     La marge se fait en dessinant le glyphe dans une image plus large que lui, la position dans
-    un menu n'étant pas réglable autrement. L'image reste un gabarit, donc AppKit continue de la
-    teinter avec le texte, y compris en blanc sur une ligne survolée.
+    un menu n'étant pas réglable autrement. Sans teinte l'image reste un gabarit, donc AppKit
+    continue de la teinter avec le texte, y compris en blanc sur une ligne survolée.
+
+    `tint` la peint dans une couleur fixe : les titres de section prennent celle de l'app, celui
+    des pannes prend celle de son niveau. Ces lignes ne sont jamais survolées, rien ne viendra
+    donc contredire leur couleur.
     """
-    if name not in _CHROME:
+    if (name, tint) not in _CHROME:
         symbol = NSImage.imageWithSystemSymbolName_accessibilityDescription_(name, None)
         if symbol is None:
             return None
@@ -242,6 +248,10 @@ def _chrome_symbol(name: str):
                 CHROME_GLYPH, NSFontWeightLight, NSImageSymbolScaleSmall
             )
         )
+        if tint:
+            thin = thin.imageWithSymbolConfiguration_(
+                NSImageSymbolConfiguration.configurationWithPaletteColors_([getattr(NSColor, tint)()])
+            )
         span = thin.size()
         # Image plus haute que le glyphe, glyphe dessiné vers le haut : centrer cette image
         # revient à remonter le glyphe de CHROME_LIFT.
@@ -256,9 +266,10 @@ def _chrome_symbol(name: str):
             1.0,
         )
         canvas.unlockFocus()
-        canvas.setTemplate_(True)
-        _CHROME[name] = canvas
-    return _CHROME[name]
+        # Un gabarit se laisse teinter par AppKit ; une image déjà peinte doit garder sa couleur.
+        canvas.setTemplate_(not tint)
+        _CHROME[(name, tint)] = canvas
+    return _CHROME[(name, tint)]
 
 
 _LABELS: dict[tuple, object] = {}
@@ -288,48 +299,54 @@ def _red_label(text: str, height: float, radius: float, padding: float, font: fl
     return _LABELS[key]
 
 
-# Violet, comme GitHub colore une PR mergée : distinct du rouge des actions et du jaune ou de
-# l'orange des avertissements, et il ne disparaît pas sur une ligne survolée en bleu.
-CLOSED_TINT = "systemPurpleColor"
+# Le compte secondaire porte la couleur de l'app : c'est le seul des deux qui puisse être teinté
+# sans mentir, le rouge disant l'urgence. Il reste distinct du jaune et de l'orange des
+# avertissements, et il ne disparaît pas sur une ligne survolée.
+SECOND_TINT = IDENTITY_TINT
 
 
 def _count_pill(count: str, tint: str):
     return _red_label(count, COUNT_HEIGHT, COUNT_RADIUS, COUNT_PADDING, COUNT_FONT, tint)
 
 
-def _bar_image(face, red: str, purple: str, size: float):
-    """Photo, compte rouge en haut à droite, compte violet en bas à gauche.
+def _bar_image(face, red: str, purple: str, level: str, size: float):
+    """Photo, et jusqu'à trois marques dans trois coins qui ne se disputent jamais la place.
 
-    Deux comptes qui ne se mélangent jamais : le rouge est ce qu'il y a à faire sur les PR
-    ouvertes, le violet ce que deviennent celles qui en sont sorties. Chacun déborde de son
-    côté, donc l'élément s'élargit quand l'un apparaît.
+    Le compte rouge en haut à droite, le compte violet en bas à gauche, l'avertissement en haut
+    à gauche : chacun déborde de son côté sans masquer les autres. Les comptes restent donc
+    lisibles pendant une panne — c'est le triangle qui dit qu'ils datent, pas leur absence.
+
+    L'avertissement partage la colonne de gauche avec le compte violet : il se limite à la
+    hauteur qui reste au-dessus de lui, pour ne jamais mordre sur un chiffre.
     """
     if face is None:
         return None
-    droite = _count_pill(red, "systemRedColor") if red else None
-    gauche = _count_pill(purple, CLOSED_TINT) if purple else None
-    if droite is None and gauche is None:
+    top_right = _count_pill(red, "systemRedColor") if red else None
+    bottom_left = _count_pill(purple, SECOND_TINT) if purple else None
+    room = size - (COUNT_HEIGHT + 1.0 if bottom_left is not None else 0.0)
+    top_left = _alert_symbol(level, min(ALERT_SIZE, room)) if level else None
+    if top_right is None and bottom_left is None and top_left is None:
         return face
     inner = face.size().width
-    marge_d = droite.size().width - COUNT_OVERLAP if droite else 0.0
-    marge_g = gauche.size().width - COUNT_OVERLAP if gauche else 0.0
-    canvas = NSImage.alloc().initWithSize_(NSMakeSize(marge_g + inner + marge_d, size))
+    right = top_right.size().width - COUNT_OVERLAP if top_right else 0.0
+    left = max(
+        bottom_left.size().width - COUNT_OVERLAP if bottom_left else 0.0,
+        top_left.size().width - COUNT_OVERLAP if top_left else 0.0,
+    )
+    width = left + inner + right
+    canvas = NSImage.alloc().initWithSize_(NSMakeSize(width, size))
     canvas.lockFocus()
     face.drawInRect_fromRect_operation_fraction_(
-        NSMakeRect(marge_g, 0, inner, size), NSZeroRect, NSCompositingOperationSourceOver, 1.0
+        NSMakeRect(left, 0, inner, size), NSZeroRect, NSCompositingOperationSourceOver, 1.0
     )
-    if droite is not None:
-        span = droite.size()
-        droite.drawInRect_fromRect_operation_fraction_(
-            NSMakeRect(canvas.size().width - span.width, size - span.height, span.width, span.height),
-            NSZeroRect,
-            NSCompositingOperationSourceOver,
-            1.0,
-        )
-    if gauche is not None:
-        span = gauche.size()
-        gauche.drawInRect_fromRect_operation_fraction_(
-            NSMakeRect(0, 0, span.width, span.height), NSZeroRect, NSCompositingOperationSourceOver, 1.0
+    for mark, corner in ((top_right, "haut-droite"), (bottom_left, "bas-gauche"), (top_left, "haut-gauche")):
+        if mark is None:
+            continue
+        span = mark.size()
+        x = width - span.width if corner == "haut-droite" else 0.0
+        y = 0.0 if corner == "bas-gauche" else size - span.height
+        mark.drawInRect_fromRect_operation_fraction_(
+            NSMakeRect(x, y, span.width, span.height), NSZeroRect, NSCompositingOperationSourceOver, 1.0
         )
     canvas.unlockFocus()
     return canvas
@@ -372,9 +389,19 @@ def _alert_symbol(level: str, size: float):
     if glyph is None:
         return None
     tint = getattr(NSColor, LEVELS.get(level, LEVELS["alerte"])[1])()
-    return glyph.imageWithSymbolConfiguration_(
+    painted = glyph.imageWithSymbolConfiguration_(
         NSImageSymbolConfiguration.configurationWithPaletteColors_([NSColor.whiteColor(), tint])
     )
+    if painted is None:
+        return glyph
+    # `imageWithSymbolConfiguration_` rend une image à la taille naturelle du symbole et oublie
+    # celle qu'on avait posée : sans la reprendre ici, demander onze points n'a aucun effet et le
+    # triangle vient mordre sur le compte voisin. La hauteur commande, la largeur suit, pour que
+    # le glyphe ne soit pas écrasé.
+    natural = painted.size()
+    if natural.height:
+        painted.setSize_(NSMakeSize(size * natural.width / natural.height, size))
+    return painted
 
 
 def _with_ring(face, fraction: float, size: float = RING_SIZE):
@@ -398,11 +425,15 @@ def _with_ring(face, fraction: float, size: float = RING_SIZE):
             1.0,
         )
         radius = (size - RING_WIDTH) / 2
+        # L'anneau porte la couleur de l'app : c'est le repère le plus visible de la barre, et
+        # il ne dit rien d'autre que « c'est moi qui compte le temps ». La gouttière est la même
+        # teinte très diluée, pour que le tour complet se devine même à zéro.
+        tint = getattr(NSColor, IDENTITY_TINT)()
         track = NSBezierPath.bezierPathWithOvalInRect_(
             NSMakeRect(RING_WIDTH / 2, RING_WIDTH / 2, size - RING_WIDTH, size - RING_WIDTH)
         )
         track.setLineWidth_(RING_WIDTH)
-        NSColor.quaternaryLabelColor().setStroke()
+        tint.colorWithAlphaComponent_(RING_TRACK_ALPHA).setStroke()
         track.stroke()
         if fraction > 0:
             arc = NSBezierPath.bezierPath()
@@ -411,7 +442,7 @@ def _with_ring(face, fraction: float, size: float = RING_SIZE):
                 (middle, middle), radius, 90.0, 90.0 - 360.0 * min(1.0, fraction), True
             )
             arc.setLineWidth_(RING_WIDTH)
-            NSColor.secondaryLabelColor().setStroke()
+            tint.setStroke()
             arc.stroke()
         canvas.unlockFocus()
 
@@ -422,46 +453,20 @@ def _with_ring(face, fraction: float, size: float = RING_SIZE):
 def _spinner_image(frame: str, size: float):
     """Compteur animé dessiné dans la même boîte que l'anneau, pour que l'élément ne saute pas.
 
-    En gabarit : la barre des menus le teinte alors comme son texte, clair ou sombre.
+    Dans la couleur de l'app, comme l'anneau qu'il remplace le temps d'une lecture : c'est le
+    même signal, il ne change pas de teinte en cours de route.
     """
     glyph = NSAttributedString.alloc().initWithString_attributes_(
-        frame, {NSFontAttributeName: NSFont.monospacedDigitSystemFontOfSize_weight_(13.0, NSFontWeightMedium)}
+        frame,
+        {
+            NSFontAttributeName: NSFont.monospacedDigitSystemFontOfSize_weight_(13.0, NSFontWeightMedium),
+            NSForegroundColorAttributeName: getattr(NSColor, IDENTITY_TINT)(),
+        },
     )
     span = glyph.size()
     canvas = NSImage.alloc().initWithSize_(NSMakeSize(size, size))
     canvas.lockFocus()
     glyph.drawAtPoint_(((size - span.width) / 2, (size - span.height) / 2))
-    canvas.unlockFocus()
-    canvas.setTemplate_(True)
-    return canvas
-
-
-def _with_alert(base, size: float, level: str):
-    """Avertissement en débord, à la place de la pastille de comptage.
-
-    Il la remplace au lieu de s'y ajouter : afficher un nombre qu'on sait douteux serait pire
-    que ne rien afficher. Posé à nu, sans disque derrière : le triangle plein et son point
-    d'exclamation blanc se lisent déjà seuls, et le disque alourdissait la barre.
-    """
-    if base is None:
-        return None
-    glyph = _alert_symbol(level, ALERT_SIZE)
-    if glyph is None:
-        return base
-    span = glyph.size()
-    inner = base.size().width
-    width = inner + span.width - COUNT_OVERLAP
-    canvas = NSImage.alloc().initWithSize_(NSMakeSize(width, size))
-    canvas.lockFocus()
-    base.drawInRect_fromRect_operation_fraction_(
-        NSMakeRect(0, 0, inner, size), NSZeroRect, NSCompositingOperationSourceOver, 1.0
-    )
-    glyph.drawInRect_fromRect_operation_fraction_(
-        NSMakeRect(width - span.width, size - span.height, span.width, span.height),
-        NSZeroRect,
-        NSCompositingOperationSourceOver,
-        1.0,
-    )
     canvas.unlockFocus()
     return canvas
 
@@ -683,9 +688,14 @@ def _rich(
     return text
 
 
-def _header(text: str):
-    """Titre de section : petit, gras, en capitales, pour se distinguer des lignes."""
-    return _run(text, HEADER_FONT, color=NSColor.secondaryLabelColor(), weight=NSFontWeightSemibold)
+def _header(text: str, tint: str = IDENTITY_TINT):
+    """Titre de section : petit, gras, en capitales, dans la couleur de l'app.
+
+    Coloré en entier, icône et texte : c'est la ligne qui structure le menu, donc la meilleure
+    place pour dire quelle app on a ouverte. La section des pannes prend la couleur de son
+    niveau — là, l'alerte passe devant l'identité.
+    """
+    return _run(text, HEADER_FONT, color=getattr(NSColor, tint)(), weight=NSFontWeightSemibold)
 
 
 def _note(text: str):
@@ -1339,34 +1349,33 @@ class GitTodoApp(NSObject):
                 base = _with_ring(photo, self.progress()) if ring else photo
                 span = RING_SIZE if ring else BAR_SIZE
                 suivi = summarize_closed(self.visible())
-                portrait = (
-                    _with_alert(base, span, self.level())
-                    if self.health
-                    else _bar_image(base, badge, str(suivi) if suivi else "", span)
+                portrait = _bar_image(
+                    base, badge, str(suivi) if suivi else "", self.level(), span
                 )
                 # Longueur variable : macOS ajoute 16 pt de marge à la longueur demandée,
                 # donc imposer une largeur ne fait que l'élargir.
                 self.status_item.setLength_(NSVariableStatusItemLength)
                 button.setImage_(portrait)
                 self.set_title("")
+                shown = {"rendu": "photo + pastille", "badge": badge, "compte_secondaire": str(suivi) if suivi else ""}
                 if self.health:
-                    return {
-                        "rendu": "photo + avertissement",
-                        "badge": "",
+                    shown |= {
+                        "rendu": "photo + pastille + avertissement",
                         "niveau": self.level(),
                         "github": self.service[1],
                         "degrade": sorted(self.health),
                     }
-                return {"rendu": "photo + pastille", "badge": badge, "violet": str(suivi) if suivi else ""}
+                return shown
         self.status_item.setLength_(NSVariableStatusItemLength)
         if self.health:
-            # Sans photo, l'avertissement devient l'icône elle-même, et le nombre disparaît :
-            # il n'est plus fiable tant qu'une source ne répond pas.
-            self.status_item.button().setImage_(_alert_symbol(self.level(), GLYPH_BAR))
-            self.set_title("")
+            # Sans photo, l'avertissement devient l'icône elle-même, mais le compte reste à côté :
+            # le triangle dit que le nombre date, il ne le remplace pas.
+            button.setImage_(_alert_symbol(self.level(), GLYPH_BAR))
+            numbered = badge and self.cfg.badge_style != "icon"
+            self.set_title(f" {badge}" if numbered else "")
             return {
-                "rendu": "avertissement",
-                "badge": "",
+                "rendu": "avertissement + nombre" if numbered else "avertissement",
+                "badge": badge if numbered else "",
                 "niveau": self.level(),
                 "github": self.service[1],
                 "degrade": sorted(self.health),
@@ -1496,8 +1505,8 @@ class GitTodoApp(NSObject):
         # de section reste à la taille du chrome, comme tous les autres titres.
         badge = _row_image(_alert_symbol(level, ALERT_SIZE))
         header = NSMenuItem.alloc().init()
-        header.setAttributedTitle_(_header(f"{title} ({len(self.health)})"))
-        header.setImage_(_chrome_symbol("exclamationmark.triangle.fill"))
+        header.setAttributedTitle_(_header(f"{title} ({len(self.health)})", LEVELS[level][1]))
+        header.setImage_(_chrome_symbol("exclamationmark.triangle.fill", LEVELS[level][1]))
         header.setEnabled_(False)
         menu.addItem_(header)
         # Ce que GitHub annonce de son côté : la seule façon de savoir si la panne est chez eux.
@@ -1554,7 +1563,7 @@ class GitTodoApp(NSObject):
         fenetre = self.window_of(kind)
         titre = group.label.upper() + (f" · {fenetre}" if fenetre else "")
         header.setAttributedTitle_(_header(f"{titre} ({_capped(total, len(items) > plafond)})"))
-        header.setImage_(_chrome_symbol(group.symbol))
+        header.setImage_(_chrome_symbol(group.symbol, IDENTITY_TINT))
         header.setEnabled_(False)
         menu.addItem_(header)
         for item in montrees:
@@ -1567,7 +1576,7 @@ class GitTodoApp(NSObject):
         self.rows[item.id] = item
         count = str(item.weight) if item.weight else ""
         people = item.faces or (item.avatar,)
-        tint = CLOSED_TINT if item.closed else "systemRedColor"
+        tint = SECOND_TINT if item.closed else "systemRedColor"
         face = _face(self.avatars, people, item.group.symbol, count, tint=tint)
         # Les variantes ⌥ et ⌘ ne portent pas le compte : ce n'est pas ce qu'elles font.
         plain = _face(self.avatars, people, item.group.symbol) if count else face

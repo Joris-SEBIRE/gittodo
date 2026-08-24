@@ -44,7 +44,7 @@ from Cocoa import (
     NSWindowStyleMaskTitled,
 )
 
-from . import settings
+from . import IDENTITY_TINT, settings
 from .config import CONFIG_PATH, STATE_PATH, Config
 from .models import GROUPS, ORDER
 
@@ -124,10 +124,11 @@ Le menu se met à jour pendant qu'il est ouvert.
 
 ## Quand GitHub répond mal
 
-Un triangle d'avertissement remplace la pastille de comptage, et une section en tête du menu dit \
-quelle source ne répond pas, depuis quand, et ce que cela fausse. Le nombre disparaît pendant ce \
-temps : un compte qu'on sait douteux vaut moins que pas de compte. Chaque ligne ouvre \
-`githubstatus.com`.
+Un triangle d'avertissement apparaît en haut à gauche de la photo, et une section en tête du menu \
+dit quelle source ne répond pas, depuis quand, et ce que cela fausse. Les deux comptes restent \
+affichés dans leurs coins, le rouge en haut à droite et le violet en bas à gauche : le triangle \
+occupe le troisième coin, sans jamais en masquer un — c'est lui qui dit que les nombres datent. \
+Chaque ligne ouvre `githubstatus.com`.
 
 Trois niveaux, du plus bénin au plus grave, à la couleur du triangle et au titre de la section :
 
@@ -232,6 +233,18 @@ redémarrage. Le fichier se complète seul quand une option apparaît.
 affiche « figé depuis »
 - `python -m gittodo --print` en texte, `--as <login>` pour la vue d'un collègue
 
+## La couleur de l'app
+
+GitTodo est **violet**, LinearTodo est **bleu** : deux icônes voisines dans la barre, la même \
+mise en page et le même vocabulaire dans les menus, il faut bien un signe pour savoir laquelle \
+parle. Cette couleur ne dit rien de l'état, seulement *qui* affiche.
+
+On la trouve à quatre endroits : l'anneau du prochain cycle et le compteur animé qui le \
+remplace, le compte secondaire, les titres de section — icône et texte — et les titres de cette \
+fenêtre. Le rouge, lui, reste au rouge : c'est de l'urgence, pas une identité. Et la section des \
+pannes garde la couleur de son niveau, jaune, orange ou rouge : là, l'alerte passe devant \
+l'identité.
+
 ## Icône de la barre
 
 Deux comptes, deux coins. La pastille rouge, en haut à droite, est ce qu'il reste à faire sur les \
@@ -241,8 +254,8 @@ jusqu'à ce que tu ouvres la ligne. Le violet est la couleur dont GitHub colore 
 
 Par défaut, la photo de l'identité observée, une pastille rouge, et un anneau qui se remplit \
 dans le sens horaire jusqu'au prochain cycle. L'anneau s'efface pendant une lecture, où le \
-compteur animé prend le relais, et quand une source ne répond plus, où le décompte n'a plus de \
-sens. `show_refresh_ring` l'éteint. `badge_style` accepte aussi \
+compteur animé prend le relais ; il continue de tourner quand une source ne répond plus, \
+puisqu'un nouvel essai est justement ce qu'on attend. `show_refresh_ring` l'éteint. `badge_style` accepte aussi \
 `count`, `icon_count` et `icon`, plus étroits quand la barre des menus est saturée. \
 ⌘-glisser l'icône vers la droite la met à l'abri des masquages de macOS.
 """
@@ -357,6 +370,11 @@ def _inline(line: str, size: float, weight: float, colour, style) -> NSMutableAt
     return out
 
 
+def _identity():
+    """Couleur de l'app, pour que la fenêtre se reconnaisse avant même d'être lue."""
+    return getattr(NSColor, IDENTITY_TINT)()
+
+
 def render(document_text: str) -> NSMutableAttributedString:
     body = NSMutableAttributedString.alloc().init()
     for raw in document_text.strip("\n").split("\n"):
@@ -364,9 +382,9 @@ def render(document_text: str) -> NSMutableAttributedString:
         if not line:
             continue
         if line.startswith("# "):
-            piece = _inline(line[2:], 22.0, NSFontWeightSemibold, NSColor.labelColor(), _style(2.0))
+            piece = _inline(line[2:], 22.0, NSFontWeightSemibold, _identity(), _style(2.0))
         elif line.startswith("## "):
-            piece = _inline(line[3:], 15.0, NSFontWeightSemibold, NSColor.labelColor(), _style(22.0))
+            piece = _inline(line[3:], 15.0, NSFontWeightSemibold, _identity(), _style(22.0))
         elif line.startswith("### "):
             piece = _inline(line[4:], 12.5, NSFontWeightSemibold, NSColor.labelColor(), _style(14.0))
         elif line.startswith("- "):

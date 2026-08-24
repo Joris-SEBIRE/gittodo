@@ -110,6 +110,14 @@ Le menu se met à jour pendant qu'il est ouvert, sans qu'il faille le refermer.
 Une seule instance tourne à la fois, garantie par un verrou sur
 `~/Library/Application Support/GitTodo/gittodo.lock`.
 
+## La couleur de l'app
+
+GitTodo est violet, [LinearTodo](../lineartodo) est bleu. La couleur porte l'anneau du prochain
+cycle, le compteur animé qui le remplace pendant une lecture, le compte secondaire, les titres de
+section — icône et texte — et les titres de la fenêtre de réglages. Le rouge reste réservé à
+l'urgence, et la section des pannes garde la couleur de son niveau : là, l'alerte passe devant
+l'identité.
+
 ## Réglages
 
 Menu **Réglages et mode d'emploi**. La fenêtre contient les deux : à gauche un formulaire pour
@@ -157,7 +165,9 @@ recopie pas un `config.json` venu d'ailleurs sans avoir lu ces deux champs.
 
 ## Quand ça va mal
 
-- Un triangle d'avertissement remplace la pastille dès qu'une source ne répond plus. Le menu
+- Un triangle d'avertissement apparaît en haut à gauche de la photo dès qu'une source ne répond
+  plus, dans le coin que les deux comptes n'occupent pas : il ne masque donc jamais un nombre, il
+  dit que ces nombres datent. Le menu
   ouvre alors une section qui nomme la source, l'erreur, depuis quand, et ce que cela fausse.
   Trois niveaux : jaune quand rien n'est cassé chez GitHub mais que l'app ne peut plus tout lire,
   orange quand une source auxiliaire échoue, rouge quand la requête principale échoue ou que

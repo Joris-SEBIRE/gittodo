@@ -97,7 +97,7 @@ CHROME_GLYPH = 11.0
 # Remontée optique des icônes de chrome. AppKit centre la boîte de l'image dans la ligne, alors
 # que l'encre d'un texte en capitales monte plus haut qu'elle ne descend : mesuré au pixel sur le
 # menu réel, l'icône tombait 0,75 à 2,25 pt sous le centre visuel du titre.
-CHROME_LIFT = 1.75
+CHROME_LIFT = 1.5
 # Marge de gauche commune aux icônes de chrome et aux vignettes des lignes : la même constante
 # pour les deux, sinon les deux colonnes se désaligneraient au premier réglage de l'une.
 LEFT_MARGIN = 6.0

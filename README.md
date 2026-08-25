@@ -112,7 +112,7 @@ Une seule instance tourne à la fois, garantie par un verrou sur
 
 ## La couleur de l'app
 
-GitTodo est violet, [LinearTodo](../lineartodo) est bleu. La couleur porte l'anneau du prochain
+GitTodo est violet, [LinearTodo](https://github.com/Joris-SEBIRE/lineartodo) est bleu. La couleur porte l'anneau du prochain
 cycle, le compteur animé qui le remplace pendant une lecture, le compte secondaire, les titres de
 section — icône et texte — et les titres de la fenêtre de réglages. Le rouge reste réservé à
 l'urgence, et la section des pannes garde la couleur de son niveau : là, l'alerte passe devant
@@ -202,6 +202,11 @@ permet de le vérifier avec `make print`.
 Version 1.0.0. Interface en français uniquement. Le bundle n'est ni signé ni notarisé : il est
 construit sur ta machine, donc macOS ne le met pas en quarantaine, mais il ne se distribue pas
 tel quel.
+
+## Marques
+
+Projet personnel, sans aucun lien avec GitHub ni son approbation. « GitHub » et son logo
+appartiennent à leur propriétaire ; ce dépôt n'utilise que son API publique, en lecture.
 
 ## Licence
 

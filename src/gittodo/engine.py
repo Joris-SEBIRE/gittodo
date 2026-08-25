@@ -22,6 +22,13 @@ from .models import GROUPS, ORDER, Closure, Comment, Item, Kind, PullRequest, pa
 CI_BROKEN = {"FAILURE", "ERROR"}
 CI_OK = {"SUCCESS", None}
 MAX_CHIPS = 5
+# Les deux fins possibles d'une PR, dans le glyphe et la couleur que GitHub leur donne : le
+# violet du merge, le rouge de la fermeture sans merge. Une PR clôturée n'a pas d'autre état,
+# `merged` étant un booléen du côté de GitHub comme du nôtre.
+CLOSED_STATUS = {
+    True: ("arrow.triangle.merge", "mergée", "githubMergedColor"),
+    False: ("xmark.circle", "fermée", "githubClosedColor"),
+}
 
 
 def _humans(comments: tuple[Comment, ...], ignored: set[str]) -> list[Comment]:
@@ -193,7 +200,7 @@ def _flags(pr: PullRequest) -> tuple[tuple[str, str], ...]:
 
 def _item(
     pr: PullRequest, kind: Kind, key: str, at: datetime, url: str = "", counted: tuple = (),
-    note: str = "", **extra
+    note: str = "", status: tuple = (), **extra
 ) -> Item:
     """Une ligne : titre de la PR en haut, métadonnées uniformes en dessous.
 
@@ -203,7 +210,8 @@ def _item(
     `counted` porte les pastilles chiffrées, celles qui décomposent la pastille rouge. Le
     poids en est déduit, ce qui garantit par construction que les nombres de la ligne
     s'additionnent jusqu'au badge. Une action sans décomposition compte pour elle-même,
-    avec l'icône de sa catégorie. Les drapeaux d'état viennent après, sans nombre.
+    avec l'icône de sa catégorie. `status` porte l'état de la PR, qui vient juste après les
+    nombres parce qu'il vaut pour toute la ligne. Les drapeaux d'état viennent après, sans nombre.
     """
     conflict = pr.mergeable == "CONFLICTING"
     # Une ligne compte si elle est actionnable, ou si elle relève du suivi des PR clôturées :
@@ -227,8 +235,12 @@ def _item(
         fingerprint=f"{key}:{at.isoformat()}",
         repo=pr.repo,
         weight=sum(number for _, number in counted) if compte else 0,
-        chips=(numbered + flags)[:MAX_CHIPS],
+        chips=(numbered + status + flags)[: MAX_CHIPS + len(status)],
         route=f"{pr.head} → {pr.base}" if pr.head and pr.base else "",
+        # CODEOWNERS a posé une demande de review, et elle reste posée tant que l'avis n'est pas
+        # rendu : c'est la seule obligation de review qu'un token sans droits d'admin puisse
+        # voir, la règle de protection de branche n'étant lisible que par un administrateur.
+        guarded=bool(pr.code_owners),
         tag="conflit" if conflict else "",
         **extra,
     )
@@ -392,7 +404,10 @@ def _mine_items(pr: PullRequest, me: str, cfg: Config, talk: list[Item]) -> list
     elif pr.reviewers:
         add(
             Kind.WAITING_REVIEW,
-            f"chez {', '.join('@' + r.lstrip('@') for r in pr.reviewers)}",
+            "chez "
+            + ", ".join(
+                "@" + r.lstrip("@") + (" (obligatoire)" if r in pr.code_owners else "") for r in pr.reviewers
+            ),
             who=tuple(r.lstrip("@") for r in pr.reviewers),
         )
     elif pr.reviews:
@@ -424,7 +439,8 @@ def _others_items(pr: PullRequest, me: str, cfg: Config, talk: list[Item]) -> li
         # n'attend pas le rebase : la mention passe devant.
         return [add(Kind.BLOCKED_FOR_AUTHOR, f"en conflit : à @{pr.author} de rebaser avant que tu reviewes")]
     if "toReview" in pr.sources:
-        return [add(Kind.REVIEW_REQUESTED, f"review demandée nommément sur la PR de @{pr.author}")]
+        raison = "obligatoire, tu es code owner" if me in pr.code_owners else "demandée nommément"
+        return [add(Kind.REVIEW_REQUESTED, f"review {raison} sur la PR de @{pr.author}")]
     if "assigned" in pr.sources:
         return [add(Kind.ASSIGNED, f"PR de @{pr.author} qui t'est assignée")]
     # Une review demandée ou une assignation dit déjà, et mieux, ce qu'on attend de moi : la
@@ -547,8 +563,10 @@ def closed_items(closures: list[Closure], me: str, cfg: Config) -> list[Item]:
     histoire: list[Item] = []
     for closure in sorted(closures, key=lambda c: c.at, reverse=True):
         pr = closure.pr
-        fait = "mergée" if closure.merged else "fermée sans merge"
-        par = f"{fait} par @{closure.actor}" if closure.actor else fait
+        # Le mot vient de la pastille : une seule source, sinon le renommer ici laisserait
+        # l'infobulle et les lignes d'action dire l'ancien terme.
+        etat = CLOSED_STATUS[bool(closure.merged)]
+        par = f"{etat[1]} par @{closure.actor}" if closure.actor else etat[1]
         for item in _messages(pr, me, ignored, acks, since=closure.at, mine_closes=True):
             # « J'ai parlé en dernier » n'est pas une information sur une PR fermée : personne
             # n'y répondra plus.
@@ -563,7 +581,11 @@ def closed_items(closures: list[Closure], me: str, cfg: Config) -> list[Item]:
                 Kind.RECENTLY_CLOSED,
                 pr.id,
                 closure.at,
-                note=par,
+                # L'état est dit par la pastille, en couleur : la ligne ne garde que celui qui
+                # a clôturé, et seulement quand ce n'est pas l'auteur, dont le login est déjà
+                # dans les métadonnées. L'infobulle, elle, garde la phrase entière.
+                note=f"par @{closure.actor}" if closure.actor and closure.actor != pr.author else "",
+                status=(etat,),
                 avatar=closure.actor_avatar or pr.avatar,
                 hint=f"{par} le {closure.at:%d/%m à %H:%M}",
                 closed=True,

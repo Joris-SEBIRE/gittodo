@@ -94,9 +94,15 @@ pour elle.
 - **⌘** maintenu : la ligne devient « Copier le lien ».
 - **⌘R** : actualise tout de suite.
 - Le point ● marque ce qui est arrivé depuis la dernière ouverture du menu.
-- Le délai « depuis X » et les pastilles chiffrées prennent la couleur de la pastille de la
-  ligne : rouge pour ce qu'il reste à faire, violet pour le suivi des PR clôturées, gris quand la
-  ligne ne compte rien. Les drapeaux d'état restent gris, ils ne comptent rien.
+- Trois sortes de pastilles, et seulement trois. Chiffrée : elle décompose le compte de la ligne
+  et prend sa couleur, rouge pour ce qu'il reste à faire, violet pour le suivi des PR clôturées.
+  État de fin de PR : la couleur de GitHub, violet `mergée` ou rouge `fermée`, sans nombre.
+  Drapeau d'état : gris, sans nombre.
+- Le délai « depuis X » prend la couleur de la pastille de la ligne, et reste gris quand la ligne
+  ne compte rien.
+- Le bouclier, devant le nom de la branche, marque une review obligatoire encore en attente :
+  CODEOWNERS l'a demandée, elle ne peut pas être contournée. Il tient cette ligne parce que la
+  protection porte sur la branche visée. L'infobulle dit de qui la review est attendue.
 - Un compte suivi d'un `+` est un plancher : la liste est écrêtée, ou une recherche a buté sur sa
   limite. Sans `+`, le compte est exact, même s'il tombe pile sur le plafond.
 - Un anneau se remplit autour de la photo, dans le sens horaire, jusqu'au prochain cycle : le
@@ -113,10 +119,12 @@ Une seule instance tourne à la fois, garantie par un verrou sur
 ## La couleur de l'app
 
 GitTodo est violet, [LinearTodo](https://github.com/Joris-SEBIRE/lineartodo) est bleu. La couleur porte l'anneau du prochain
-cycle, le compteur animé qui le remplace pendant une lecture, le compte secondaire, les titres de
-section — icône et texte — et les titres de la fenêtre de réglages. Le rouge reste réservé à
-l'urgence, et la section des pannes garde la couleur de son niveau : là, l'alerte passe devant
-l'identité.
+cycle, le compteur animé qui le remplace pendant une lecture, les titres de section — icône et
+texte — et les titres de la fenêtre de réglages. Le suivi des PR clôturées, lui, prend le violet
+dont GitHub colore un merge : compte secondaire, nombres de la ligne et état de la PR dans la
+même teinte. Le rouge dit l'urgence, sauf sur une PR fermée sans merge, où il dit la fin de la PR
+comme GitHub le fait. La section des pannes garde la couleur de son niveau : là, l'alerte passe
+devant l'identité.
 
 ## Réglages
 
@@ -127,7 +135,7 @@ installation. Le bouton d'enregistrement n'apparaît que si tu as modifié quelq
 Les réglages sont écrits dans `~/.config/gittodo/config.json`, relu à chaud. Le fichier se
 complète seul quand une option apparaît.
 
-Le mode d'emploi de la fenêtre va plus loin que ce README : les dix-neuf sections du menu une
+Le mode d'emploi de la fenêtre va plus loin que ce README : les vingt sections du menu une
 par une, les règles de comptage et d'anti-doublon, le coût en quota de chaque requête, et les
 valeurs réelles de ton installation.
 

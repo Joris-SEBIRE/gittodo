@@ -61,7 +61,8 @@ def dump(argv: list[str]) -> int:
         print(f"\n{marker} {GROUPS[kind].label.upper()} ({total})")
         for item in group:
             pill = f"[{item.weight}] " if item.weight else "[ ] "
-            chips = "  ".join(f"{name}{' ' + label if label else ''}" for name, label in item.chips)
+            chips = "  ".join(f"{name}{' ' + label if label else ''}" for name, label, *_ in item.chips)
+            chips = f"shield  {chips}" if item.guarded else chips
             print(f"    {pill}{item.title}\n      {item.detail}\n      {chips}\n      {item.url}")
     return 0
 

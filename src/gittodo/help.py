@@ -209,6 +209,18 @@ ne compte rien. Les drapeaux d'état, eux, ne comptent rien et gardent leur gris
 l'information qu'on cherche en premier sur une ligne qui attend ; les pastilles chiffrées disent \
 de quoi son compte est fait.
 
+Il y a donc trois sortes de pastilles, et seulement trois. Chiffrée : elle décompose le compte \
+de la ligne et prend sa couleur. État de fin de PR, sur une ligne clôturée : le glyphe et la \
+couleur que GitHub lui donne, violet `mergée` ou rouge `fermée`, sans nombre, parce qu'elle dit \
+ce qu'est devenue la PR et non ce qu'il reste à faire. Drapeau d'état : gris, sans nombre.
+
+Le bouclier, lui, n'est pas une pastille : il se dessine sur la troisième ligne, devant le nom \
+de la branche, parce qu'une review obligatoire protège la branche visée et non la PR. Il dit \
+qu'une demande posée par CODEOWNERS attend toujours son avis, et qu'on ne peut pas la \
+contourner. C'est la seule obligation de review qu'un token sans droits d'administration puisse \
+voir : `branchProtectionRule` lui est refusée, et `reviewDecision` reste vide. L'infobulle nomme \
+celui dont la review est attendue.
+
 L'étiquette rouge `conflit` marque un `mergeable: CONFLICTING`. Le survol détaille le compte.
 
 Clic : ouvrir au bon endroit. **⌥** : masquer jusqu'à la prochaine activité, en local. **⌘** : \
@@ -239,11 +251,12 @@ GitTodo est **violet**, LinearTodo est **bleu** : deux icônes voisines dans la 
 mise en page et le même vocabulaire dans les menus, il faut bien un signe pour savoir laquelle \
 parle. Cette couleur ne dit rien de l'état, seulement *qui* affiche.
 
-On la trouve à quatre endroits : l'anneau du prochain cycle et le compteur animé qui le \
-remplace, le compte secondaire, les titres de section — icône et texte — et les titres de cette \
-fenêtre. Le rouge, lui, reste au rouge : c'est de l'urgence, pas une identité. Et la section des \
-pannes garde la couleur de son niveau, jaune, orange ou rouge : là, l'alerte passe devant \
-l'identité.
+On la trouve à trois endroits : l'anneau du prochain cycle et le compteur animé qui le \
+remplace, les titres de section — icône et texte — et les titres de cette fenêtre. Le suivi des \
+PR clôturées, lui, ne porte pas l'identité mais le violet de GitHub, celui d'un merge. Le rouge \
+dit l'urgence, sauf sur une PR fermée sans merge, où il dit la fin de la PR comme GitHub le \
+fait. Et la section des pannes garde la couleur de son niveau, jaune, orange ou rouge : là, \
+l'alerte passe devant l'identité.
 
 ## Icône de la barre
 

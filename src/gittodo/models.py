@@ -212,6 +212,9 @@ class PullRequest:
     head: str = ""
     base: str = ""
     reviews: tuple[Review, ...] = ()
+    # Parmi eux, ceux que CODEOWNERS désigne : leur review est obligatoire pour merger, et la
+    # demande reste posée tant qu'ils n'ont pas rendu leur avis.
+    code_owners: tuple[str, ...] = ()
     last_commit_at: datetime | None = None
     sources: set[str] = field(default_factory=set)
     # Photo par login, alimentée par l'auteur, les reviewers et les messages : de quoi mettre
@@ -253,12 +256,16 @@ class Item:
     # Nombre de notifications portées par la ligne : 1 par action, davantage quand
     # plusieurs messages attendent une réponse. 0 pour les lignes informatives.
     weight: int = 1
-    # État de la PR résumé en pastilles (symbole SF, nombre éventuel).
-    chips: tuple[tuple[str, str], ...] = ()
+    # État de la PR résumé en pastilles : symbole SF, nombre ou mot éventuel, et pour l'état
+    # d'une PR clôturée le nom de la couleur qui lui est propre.
+    chips: tuple[tuple[str, str] | tuple[str, str, str], ...] = ()
     # Explication au survol : ce que la pastille compte, et pourquoi la ligne est là.
     hint: str = ""
     # « branche → cible », affiché sous les métadonnées.
     route: str = ""
+    # Une review obligatoire manque : le bouclier se dessine devant le trajet, la protection
+    # portant sur la branche visée.
+    guarded: bool = False
     # Étiquette dessinée en tête des métadonnées, pour un état qui doit sauter aux yeux.
     tag: str = ""
     # None = l'urgence par défaut de la catégorie.

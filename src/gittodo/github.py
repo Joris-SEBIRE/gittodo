@@ -622,13 +622,18 @@ def _parse_pr(node: dict) -> PullRequest:
     commits = (node.get("commits") or {}).get("nodes") or []
     rollup = ((commits[0]["commit"] if commits else {}) or {}).get("statusCheckRollup") or {}
     reviewers = []
+    owners = []
     # Photo par login : l'auteur, les reviewers sollicités, ceux qui ont posé un avis, et tous
     # ceux qui ont écrit. C'est ce qui permet de montrer les visages des gens qu'une ligne cite.
     portraits: dict[str, str] = {author: author_avatar} if author_avatar else {}
     for request in ((node.get("reviewRequests") or {}).get("nodes") or []):
         reviewer = request.get("requestedReviewer") or {}
         if name := reviewer.get("login") or reviewer.get("slug"):
-            reviewers.append(name if reviewer.get("__typename") == "User" else f"@{name}")
+            asked = name if reviewer.get("__typename") == "User" else f"@{name}"
+            reviewers.append(asked)
+            # Une demande posée par CODEOWNERS ne se retire pas : la review est obligatoire.
+            if request.get("asCodeOwner"):
+                owners.append(asked)
             if face := reviewer.get("avatarUrl"):
                 portraits[name] = face
     threads = tuple(
@@ -668,6 +673,7 @@ def _parse_pr(node: dict) -> PullRequest:
         mergeable=node.get("mergeable"),
         ci_state=rollup.get("state"),
         reviewers=tuple(reviewers),
+        code_owners=tuple(owners),
         reviews_count=((node.get("reviews") or {}).get("totalCount") or 0),
         threads=threads,
         comments=comments,

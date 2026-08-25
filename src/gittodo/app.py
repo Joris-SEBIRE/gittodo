@@ -10,6 +10,8 @@ from dataclasses import replace
 
 import objc
 from Cocoa import (
+    NSAppearanceNameAqua,
+    NSAppearanceNameDarkAqua,
     NSApplication,
     NSApplicationActivationPolicyAccessory,
     NSAttributedString,
@@ -102,6 +104,8 @@ CHROME_LIFT = 1.5
 # pour les deux, sinon les deux colonnes se désaligneraient au premier réglage de l'une.
 LEFT_MARGIN = 6.0
 GLYPH_CHIP = 10.0
+# Glyphe de la ligne du trajet : un cran sous celui des pastilles, comme sa police.
+GLYPH_ROUTE = 9.0
 # Étiquette de texte (« conflit ») et pastille de comptage : même primitive, deux géométries.
 TAG_HEIGHT, TAG_RADIUS, TAG_PADDING = 13.0, 3.0, 10.0
 COUNT_HEIGHT, COUNT_RADIUS, COUNT_PADDING = 10.0, 5.0, 4.0
@@ -168,6 +172,33 @@ COUNT_RESERVE = 5.0
 STACK_STEP = 12.0
 STACK_MAX = 3
 RING_WIDTH = 1.2
+# Couleurs d'état de GitHub, la claire puis la sombre : le violet du merge et le rouge de la
+# fermeture sans merge. Reprendre les siennes plutôt que les couleurs système fait qu'une ligne
+# du menu dit la même chose, dans la même teinte, que la PR sur github.com.
+GITHUB_COLOURS = {
+    "githubMergedColor": ((0x82, 0x50, 0xDF), (0xA3, 0x71, 0xF7)),
+    "githubClosedColor": ((0xCF, 0x22, 0x2E), (0xF8, 0x51, 0x49)),
+}
+APPEARANCES = [NSAppearanceNameAqua, NSAppearanceNameDarkAqua]
+
+
+def _colour(name: str):
+    """Couleur nommée : celles de GitHub d'abord, sinon la couleur système homonyme.
+
+    Une seule résolution pour toutes les teintes du menu, ce qui permet de nommer une couleur
+    de GitHub partout où on nommait déjà une couleur système. Le fournisseur dynamique est
+    interrogé par AppKit au moment du dessin, donc ces couleurs suivent le passage clair/sombre
+    exactement comme les couleurs système, sans recalcul de notre part.
+    """
+    pair = GITHUB_COLOURS.get(name)
+    if pair is None:
+        return getattr(NSColor, name)()
+
+    def resolve(appearance):
+        red, green, blue = pair[appearance.bestMatchFromAppearancesWithNames_(APPEARANCES) == NSAppearanceNameDarkAqua]
+        return NSColor.colorWithSRGBRed_green_blue_alpha_(red / 255, green / 255, blue / 255, 1.0)
+
+    return NSColor.colorWithName_dynamicProvider_(name, resolve)
 
 
 def _symbol(name: str, size: float):
@@ -250,7 +281,7 @@ def _chrome_symbol(name: str, tint: str = ""):
         )
         if tint:
             thin = thin.imageWithSymbolConfiguration_(
-                NSImageSymbolConfiguration.configurationWithPaletteColors_([getattr(NSColor, tint)()])
+                NSImageSymbolConfiguration.configurationWithPaletteColors_([_colour(tint)])
             )
         span = thin.size()
         # Image plus haute que le glyphe, glyphe dessiné vers le haut : centrer cette image
@@ -289,7 +320,7 @@ def _red_label(text: str, height: float, radius: float, padding: float, font: fl
         width = max(height, measured.width + padding)
         canvas = NSImage.alloc().initWithSize_(NSMakeSize(width, height))
         canvas.lockFocus()
-        getattr(NSColor, tint)().setFill()
+        _colour(tint).setFill()
         NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
             NSMakeRect(0, 0, width, height), radius, radius
         ).fill()
@@ -302,7 +333,10 @@ def _red_label(text: str, height: float, radius: float, padding: float, font: fl
 # Le compte secondaire porte la couleur de l'app : c'est le seul des deux qui puisse être teinté
 # sans mentir, le rouge disant l'urgence. Il reste distinct du jaune et de l'orange des
 # avertissements, et il ne disparaît pas sur une ligne survolée.
-SECOND_TINT = IDENTITY_TINT
+# Le suivi des PR clôturées porte le violet dont GitHub colore un merge, pas celui de l'app :
+# la pastille de la barre, les nombres de la ligne et l'état de la PR disent ainsi la même chose
+# dans la même teinte. L'identité de l'app, elle, reste sur les titres de section et l'anneau.
+SECOND_TINT = "githubMergedColor"
 
 
 def _count_pill(count: str, tint: str):
@@ -388,7 +422,7 @@ def _alert_symbol(level: str, size: float):
     glyph = _symbol("exclamationmark.triangle.fill", size)
     if glyph is None:
         return None
-    tint = getattr(NSColor, LEVELS.get(level, LEVELS["alerte"])[1])()
+    tint = _colour(LEVELS.get(level, LEVELS["alerte"])[1])
     painted = glyph.imageWithSymbolConfiguration_(
         NSImageSymbolConfiguration.configurationWithPaletteColors_([NSColor.whiteColor(), tint])
     )
@@ -428,7 +462,7 @@ def _with_ring(face, fraction: float, size: float = RING_SIZE):
         # L'anneau porte la couleur de l'app : c'est le repère le plus visible de la barre, et
         # il ne dit rien d'autre que « c'est moi qui compte le temps ». La gouttière est la même
         # teinte très diluée, pour que le tour complet se devine même à zéro.
-        tint = getattr(NSColor, IDENTITY_TINT)()
+        tint = _colour(IDENTITY_TINT)
         track = NSBezierPath.bezierPathWithOvalInRect_(
             NSMakeRect(RING_WIDTH / 2, RING_WIDTH / 2, size - RING_WIDTH, size - RING_WIDTH)
         )
@@ -460,7 +494,7 @@ def _spinner_image(frame: str, size: float):
         frame,
         {
             NSFontAttributeName: NSFont.monospacedDigitSystemFontOfSize_weight_(13.0, NSFontWeightMedium),
-            NSForegroundColorAttributeName: getattr(NSColor, IDENTITY_TINT)(),
+            NSForegroundColorAttributeName: _colour(IDENTITY_TINT),
         },
     )
     span = glyph.size()
@@ -566,34 +600,38 @@ def _attachment(image, offset: float):
     return piece
 
 
-def _chip_run(chips, tint: str | None = None):
+def _chip_run(chips, tint: str | None = None, font: float = META_FONT, glyph: float = GLYPH_CHIP,
+              gap: str = "   "):
     """Pastilles d'état inline : icône SF + nombre.
 
     Celles qui portent un nombre décomposent la pastille de la ligne : elles prennent sa
     couleur, glyphe et nombre ensemble, pour qu'on voie du premier coup d'œil de quoi le compte
-    est fait. Les drapeaux d'état, eux, restent dans le gris des métadonnées.
+    est fait. Une pastille peut aussi nommer sa propre couleur, ce dont se sert l'état d'une PR
+    clôturée pour reprendre celle de GitHub. Les drapeaux d'état, eux, restent dans le gris des
+    métadonnées.
 
     La configuration de palette laisse AppKit résoudre la couleur au dessin, donc les icônes
     suivent le passage clair/sombre sans être recalculées.
     """
     grey = NSColor.secondaryLabelColor()
-    accent = getattr(NSColor, tint)() if tint else None
+    accent = _colour(tint) if tint else None
     run = NSMutableAttributedString.alloc().init()
-    for name, label in chips:
-        image = _symbol(name, GLYPH_CHIP)
+    for name, label, *own in chips:
+        image = _symbol(name, glyph)
         if image is None:
             continue
-        colour = accent if label and accent is not None else grey
+        strong = bool(own) or bool(label and accent is not None)
+        colour = _colour(own[0]) if own else (accent if strong else grey)
         tinted = image.imageWithSymbolConfiguration_(
             NSImageSymbolConfiguration.configurationWithPaletteColors_([colour])
         )
         run.appendAttributedString_(_attachment(tinted, -1.0))
         run.appendAttributedString_(
             _run(
-                (f" {label}" if label else "") + "   ",
-                META_FONT,
+                (f" {label}" if label else "") + gap,
+                font,
                 color=colour,
-                weight=NSFontWeightMedium if label and accent is not None else None,
+                weight=NSFontWeightMedium if strong else None,
             )
         )
     return run
@@ -620,7 +658,7 @@ def _meta_run(detail: str, tint: str | None, lead: str, trailing: str, paragraph
     contraste avec ce gris qui fait ressortir l'ancienneté, pas la couleur en elle-même.
     """
     grey = NSColor.secondaryLabelColor()
-    accent = getattr(NSColor, tint)() if tint else None
+    accent = _colour(tint) if tint else None
     run = NSMutableAttributedString.alloc().init()
     for index, part in enumerate(truncate(detail, DETAIL_WIDTH).split(META_SEPARATOR)):
         run.appendAttributedString_(
@@ -649,6 +687,7 @@ def _rich(
     route: str = "",
     tag: str = "",
     tint: str | None = None,
+    guarded: bool = False,
 ):
     """Ligne complète : titre, ligne de métadonnées, puis trajet de branche.
 
@@ -676,10 +715,18 @@ def _rich(
         )
     if chips:
         text.appendAttributedString_(_chip_run(chips, tint))
-    if route:
+    if route or guarded:
+        text.appendAttributedString_(_run("\n", ROUTE_FONT, paragraph=paragraph))
+        # Le bouclier tient la ligne du trajet, parce qu'une review obligatoire protège la
+        # branche visée et non la PR. Il y prend le gris des drapeaux, un ton plus franc que
+        # celui du trajet, sinon il disparaîtrait dans le plus pâle des gris du menu.
+        if guarded:
+            text.appendAttributedString_(
+                _chip_run((("shield", ""),), font=ROUTE_FONT, glyph=GLYPH_ROUTE, gap=" ")
+            )
         text.appendAttributedString_(
             _run(
-                "\n" + truncate(route, ROUTE_WIDTH),
+                truncate(route, ROUTE_WIDTH),
                 ROUTE_FONT,
                 color=NSColor.tertiaryLabelColor(),
                 paragraph=paragraph,
@@ -695,7 +742,7 @@ def _header(text: str, tint: str = IDENTITY_TINT):
     place pour dire quelle app on a ouverte. La section des pannes prend la couleur de son
     niveau — là, l'alerte passe devant l'identité.
     """
-    return _run(text, HEADER_FONT, color=getattr(NSColor, tint)(), weight=NSFontWeightSemibold)
+    return _run(text, HEADER_FONT, color=_colour(tint), weight=NSFontWeightSemibold)
 
 
 def _note(text: str):
@@ -1589,6 +1636,7 @@ class GitTodoApp(NSObject):
                 item.route,
                 item.tag,
                 tint if count else None,
+                item.guarded,
             ),
             "openItem:",
             item.id,

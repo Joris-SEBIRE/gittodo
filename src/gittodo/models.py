@@ -48,14 +48,14 @@ class Group:
 GROUPS: dict[Kind, Group] = {
     Kind.REVIEW_REQUESTED: Group(Kind.REVIEW_REQUESTED, "À reviewer", "eye", True),
     Kind.REVIEW_AGAIN: Group(Kind.REVIEW_AGAIN, "À reviewer de nouveau", "arrow.clockwise", True),
-    Kind.ASSIGNED: Group(Kind.ASSIGNED, "Assignées à moi", "person.crop.circle.badge.checkmark", True),
+    Kind.ASSIGNED: Group(Kind.ASSIGNED, "PR qui me sont assignées", "person.crop.circle.badge.checkmark", True),
     Kind.MESSAGES_TO_ANSWER: Group(
         Kind.MESSAGES_TO_ANSWER, "On attend ma réponse", "bubble.left.and.bubble.right", True
     ),
     Kind.REPLIES_TO_CHECK: Group(
         Kind.REPLIES_TO_CHECK, "On m'a répondu", "arrowshape.turn.up.left", True
     ),
-    Kind.MENTION: Group(Kind.MENTION, "Mentions", "at", True),
+    Kind.MENTION: Group(Kind.MENTION, "On m'a nommé", "at", True),
     Kind.CHANGES_REQUESTED: Group(Kind.CHANGES_REQUESTED, "Mes PR à corriger", "arrow.uturn.left", True, True),
     Kind.CONFLICTS: Group(Kind.CONFLICTS, "Mes PR en conflit", "arrow.triangle.branch", True, True),
     Kind.CI_FAILING: Group(Kind.CI_FAILING, "Mes PR avec CI rouge", "xmark.octagon", True, True),
@@ -63,13 +63,13 @@ GROUPS: dict[Kind, Group] = {
     Kind.NO_REVIEWER: Group(Kind.NO_REVIEWER, "Mes PR sans reviewer", "person.badge.plus", True),
     Kind.WAITING_REVIEW: Group(Kind.WAITING_REVIEW, "Mes PR en attente de review", "clock", False),
     Kind.WAITING_REPLY: Group(Kind.WAITING_REPLY, "Mes messages sans retour", "hourglass", False),
-    Kind.DRAFT: Group(Kind.DRAFT, "Mes drafts", "pencil.line", False),
-    Kind.APPROVED_BY_ME: Group(Kind.APPROVED_BY_ME, "J'ai approuvé", "hand.thumbsup", False),
+    Kind.DRAFT: Group(Kind.DRAFT, "Mes PR en draft", "pencil.line", False),
+    Kind.APPROVED_BY_ME: Group(Kind.APPROVED_BY_ME, "PR que j'ai approuvées", "hand.thumbsup", False),
     Kind.CHANGES_REQUESTED_BY_ME: Group(
-        Kind.CHANGES_REQUESTED_BY_ME, "J'ai demandé des changements", "exclamationmark.bubble", False
+        Kind.CHANGES_REQUESTED_BY_ME, "PR où j'ai demandé des changements", "exclamationmark.bubble", False
     ),
     Kind.BLOCKED_FOR_AUTHOR: Group(
-        Kind.BLOCKED_FOR_AUTHOR, "L'auteur doit rebaser", "arrow.triangle.branch", False
+        Kind.BLOCKED_FOR_AUTHOR, "PR en conflit chez leur auteur", "arrow.triangle.branch", False
     ),
     Kind.ORPHAN_BRANCH: Group(Kind.ORPHAN_BRANCH, "Mes branches sans PR", "arrow.branch", False),
     Kind.BRANCH_TO_DELETE: Group(Kind.BRANCH_TO_DELETE, "Mes branches à supprimer", "trash", False),

@@ -200,12 +200,20 @@ def _flags(pr: PullRequest) -> tuple[tuple[str, str], ...]:
 
 def _item(
     pr: PullRequest, kind: Kind, key: str, at: datetime, url: str = "", counted: tuple = (),
-    note: str = "", status: tuple = (), **extra
+    note: str = "", status: tuple = (), by: str = "", **extra
 ) -> Item:
     """Une ligne : titre de la PR en haut, métadonnées uniformes en dessous.
 
-    Métadonnées toujours identiques — dépôt simplifié, auteur de la PR, délai depuis la
-    dernière action — pour que l'œil trouve la même information à la même place partout.
+    Métadonnées toujours identiques — dépôt simplifié, la personne dont on voit le visage,
+    délai depuis la dernière action — pour que l'œil trouve la même information à la même
+    place partout.
+
+    `by` nomme ce visage et dit ce qu'il a fait, toujours sous la même forme : un participe
+    passé, puis la personne. « créée par @alice », « écrit par @bob », « refusée par @carol ».
+    Sans lui, une photo de reviewer sur une ligne titrée d'une PR d'autrui ne se rattache à
+    rien. À défaut, c'est l'auteur de la PR, qui est le visage par défaut — et il est nommé
+    comme les autres, même quand c'est soi : une ligne ne change pas de grammaire selon la
+    personne qu'elle montre.
 
     `counted` porte les pastilles chiffrées, celles qui décomposent la pastille rouge. Le
     poids en est déduit, ce qui garantit par construction que les nombres de la ligne
@@ -229,7 +237,7 @@ def _item(
         id=f"{kind.value}:{key}",
         kind=kind,
         title=pr.title,
-        detail=join(short_repo(pr.slug), f"@{pr.author}", since(at), note),
+        detail=join(short_repo(pr.slug), by or f"créée par @{pr.author}", since(at), note),
         url=url or pr.url,
         at=at,
         fingerprint=f"{key}:{at.isoformat()}",
@@ -311,7 +319,7 @@ def _messages(
 
     items: list[Item] = []
 
-    def add(kind: Kind, batch: list[tuple[Comment, bool]], verb: str) -> None:
+    def add(kind: Kind, batch: list[tuple[Comment, bool]], verb: str, by: str) -> None:
         if not batch:
             return
         comments = [comment for comment, _ in batch]
@@ -331,19 +339,21 @@ def _messages(
             _item(
                 pr, kind, pr.id, latest, oldest.url,
                 counted=((ON_CODE, on_code), (IN_DISCUSSION, general)),
+                by=f"{by} {who}",
                 avatar=oldest.avatar,
                 faces=tuple(face for face in speaking.values() if face),
                 hint=f"{len(batch)} message(s) de {who} {verb} : {', '.join(parts)}",
             )
         )
 
-    add(Kind.MESSAGES_TO_ANSWER, to_answer, "en attente de ta réponse")
-    add(Kind.REPLIES_TO_CHECK, to_check, "dans des fils que tu as ouverts, à vérifier puis résoudre")
+    add(Kind.MESSAGES_TO_ANSWER, to_answer, "en attente de ta réponse", "écrit par")
+    add(Kind.REPLIES_TO_CHECK, to_check, "dans des fils que tu as ouverts, à vérifier puis résoudre", "répondu par")
     if awaited and not items:
         who, last = min(awaited.items(), key=lambda pair: pair[1].created_at)
         items.append(
             _item(
                 pr, Kind.WAITING_REPLY, pr.id, last.created_at, last.url,
+                by="réponse attendue de " + ", ".join("@" + name for name in sorted(awaited)),
                 avatar=portraits.get(who) or "",
                 faces=tuple(portraits[name] for name in sorted(awaited) if portraits.get(name)),
                 hint=f"tu as parlé en dernier, tu attends {', '.join('@' + n for n in sorted(awaited))}",
@@ -358,10 +368,17 @@ def _mine_items(pr: PullRequest, me: str, cfg: Config, talk: list[Item]) -> list
     live = not pr.is_draft or cfg.drafts_are_actionable
     items: list[Item] = []
 
-    def add(kind: Kind, hint: str, urgent: bool | None = None, note: str = "", who: tuple = ()) -> None:
+    def add(
+        kind: Kind, hint: str, urgent: bool | None = None, note: str = "",
+        who: tuple = (), by: str = "",
+    ) -> None:
+        # Le visage suit `who` quand il est renseigné : ce sont eux qu'on voit, c'est donc eux
+        # que la ligne doit nommer.
+        named = f"{by} " + ", ".join("@" + name for name in who) if who and by else f"créée par @{pr.author}"
         items.append(
             _item(
                 pr, kind, pr.id, pr.updated_at, avatar=pr.avatar, urgent=urgent, hint=hint, note=note,
+                by=named,
                 faces=tuple(pr.portraits[name] for name in who if pr.portraits.get(name)),
             )
         )
@@ -374,6 +391,7 @@ def _mine_items(pr: PullRequest, me: str, cfg: Config, talk: list[Item]) -> list
             Kind.CHANGES_REQUESTED,
             f"{', '.join('@' + who for who in refused)} demande des changements",
             who=tuple(refused),
+            by="refusée par",
         )
     # Un draft en conflit n'est pas une action : c'est un choix de le laisser en draft. Le
     # conflit est signalé sur sa ligne, dans la section Draft.
@@ -387,6 +405,7 @@ def _mine_items(pr: PullRequest, me: str, cfg: Config, talk: list[Item]) -> list
             Kind.READY_TO_MERGE,
             f"approuvée par {', '.join('@' + who for who in approved)}, CI verte, sans conflit",
             who=tuple(approved),
+            by="approuvée par",
         )
     # Solliciter une review n'est pas le prochain geste si la PR est déjà bloquée.
     if live and not pr.reviewers and not pr.reviews and not items:
@@ -409,6 +428,7 @@ def _mine_items(pr: PullRequest, me: str, cfg: Config, talk: list[Item]) -> list
                 "@" + r.lstrip("@") + (" (obligatoire)" if r in pr.code_owners else "") for r in pr.reviewers
             ),
             who=tuple(r.lstrip("@") for r in pr.reviewers),
+            by="confiée à",
         )
     elif pr.reviews:
         add(Kind.WAITING_REVIEW, "reviewée, aucun point ouvert")
@@ -420,8 +440,8 @@ def _others_items(pr: PullRequest, me: str, cfg: Config, talk: list[Item]) -> li
     verdict = pr.verdicts().get(me)
     my_review = pr.my_last_review(me)
 
-    def add(kind: Kind, hint: str) -> Item:
-        return _item(pr, kind, pr.id, pr.updated_at, avatar=pr.avatar, hint=hint)
+    def add(kind: Kind, hint: str, by: str = "") -> Item:
+        return _item(pr, kind, pr.id, pr.updated_at, avatar=pr.avatar, hint=hint, by=by)
 
     if verdict == "CHANGES_REQUESTED":
         pushed_since = bool(my_review and pr.last_commit_at and pr.last_commit_at > my_review.submitted_at)
@@ -490,7 +510,7 @@ def _mention_items(notifications: list[dict], known_urls: set[str], me: str) -> 
                 title=subject.get("title") or "(sans titre)",
                 detail=join(
                     short_repo(repo) + (f"#{number}" if number else ""),
-                    f"@{author}" if author else "",
+                    f"créée par @{author}" if author else "",
                     since(at),
                 ),
                 avatar=extra.get("avatar") or "",
@@ -505,12 +525,17 @@ def _mention_items(notifications: list[dict], known_urls: set[str], me: str) -> 
     return items
 
 
-def branch_items(branches: list) -> list[Item]:
+def branch_items(branches: list, portraits: dict[str, str] | None = None, me: str = "") -> list[Item]:
     """Mes branches sans PR ouverte, réparties selon ce qu'il en reste à faire.
 
     Soit il y a du travail propre dessus et il attend une PR, soit il n'y a plus rien à en
     tirer — PR mergée, PR abandonnée, ou aucun commit en avance — et elle encombre.
+
+    Une branche n'a pas d'auteur au sens de GitHub, seulement le dernier à avoir poussé : son
+    visage vient des PR déjà lues, où il figure presque toujours. À défaut, celui de la
+    personne observée, puisque ce sont ses branches.
     """
+    portraits = portraits or {}
     items = []
     for branch in branches:
         if branch.resolved:
@@ -521,7 +546,13 @@ def branch_items(branches: list) -> list[Item]:
                 id=f"{kind.value}:{branch.key}",
                 kind=kind,
                 title=branch.name,
-                detail=join(short_repo(branch.repo), since(branch.at), branch.note),
+                detail=join(
+                    short_repo(branch.repo),
+                    f"poussée par @{branch.author}" if branch.author else f"poussée par @{me}",
+                    since(branch.at),
+                    branch.note,
+                ),
+                avatar=portraits.get(branch.author or me) or portraits.get(me, ""),
                 url=branch.delete_url if branch.obsolete else branch.url,
                 at=branch.at,
                 fingerprint=f"{branch.key}:{branch.at.isoformat()}",
@@ -581,10 +612,9 @@ def closed_items(closures: list[Closure], me: str, cfg: Config) -> list[Item]:
                 Kind.RECENTLY_CLOSED,
                 pr.id,
                 closure.at,
-                # L'état est dit par la pastille, en couleur : la ligne ne garde que celui qui
-                # a clôturé, et seulement quand ce n'est pas l'auteur, dont le login est déjà
-                # dans les métadonnées. L'infobulle, elle, garde la phrase entière.
-                note=f"par @{closure.actor}" if closure.actor and closure.actor != pr.author else "",
+                # Le visage est celui qui a clôturé : la ligne le nomme et dit son geste. Sans
+                # acteur connu, la photo retombe sur l'auteur, et la ligne le dit aussi.
+                by=par if closure.actor else f"PR de @{pr.author}",
                 status=(etat,),
                 avatar=closure.actor_avatar or pr.avatar,
                 hint=f"{par} le {closure.at:%d/%m à %H:%M}",
@@ -622,7 +652,11 @@ def build_items(
         covered = {i.url.split("#")[0] for i in items} | {pr.url for pr in prs}
         items += _mention_items(notifications, covered, me)
     if cfg.show_branches and branches:
-        items += branch_items(branches)
+        # Les visages croisés dans les PR servent aux branches, qui n'en portent aucun.
+        portraits: dict[str, str] = {}
+        for pr in prs:
+            portraits.update(pr.portraits)
+        items += branch_items(branches, portraits, me)
     if cfg.show_closed and closures:
         items += closed_items(closures, me, cfg)
     if not cfg.show_waiting:

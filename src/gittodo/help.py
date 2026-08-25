@@ -177,7 +177,7 @@ qu'une demande effacée par erreur. Une réaction les départage
 n'as jamais parlé dans cette PR. Seuls les messages qui te nomment comptent alors, pas la suite \
 de l'échange, et un `@toi` dans un bloc de code ou dans une citation n'en est pas un
 - une review demandée ou une assignation passe devant la mention : elle dit mieux ce qu'on \
-attend. La section « Mentions » ne garde que ce qu'aucune conversation visible ne porte, la \
+attend. La section « On m'a nommé » ne garde que ce qu'aucune conversation visible ne porte, la \
 description de la PR au premier chef
 - une réaction posée sur un message le sort du compte : un point acté n'attend plus rien. \
 `acknowledge_reactions` fixe lesquelles, 👍 et 👎 par défaut, parce qu'un refus est une réponse. \
@@ -200,8 +200,20 @@ plafond
 
 Photo de la personne concernée, ou l'icône de la section à défaut, surmontée du nombre de \
 notifications. Toutes les vignettes font la même largeur, sinon les titres ne s'aligneraient \
-plus d'une ligne à l'autre. Puis le titre de la PR. Puis des métadonnées constantes : dépôt et numéro, auteur, délai, pastilles d'état. Puis \
+plus d'une ligne à l'autre. Puis le titre de la PR. Puis des métadonnées constantes : dépôt et \
+numéro, **qui est sur la photo et ce qu'il a fait**, délai, pastilles d'état. Puis \
 `headRefName → baseRefName`, qui révèle les PR empilées.
+
+Le visage n'est pas toujours celui de l'auteur, et la ligne le nomme toujours de la même façon : \
+ce qui a été fait, puis par qui. « créée par » quand c'est l'auteur, y compris quand c'est toi ; \
+« écrit par » pour un message qui attend ta réponse ; « répondu par » dans un fil que tu as \
+ouvert ; « refusée par » et « approuvée par » pour les reviewers de tes PR ; « confiée à » pour \
+celui dont tu attends la review ; « réponse attendue de » pour celui qui te doit un retour ; \
+« mergée par » et « fermée par » sur une clôture ; « poussée par » sur une branche. Une ligne ne \
+change pas de grammaire selon la personne qu'elle montre.
+
+Aucune ligne ne reste sans visage : une branche, qui n'a pas d'auteur au sens de GitHub, prend \
+celui du dernier à avoir poussé, retrouvé dans les PR déjà lues.
 
 Le délai et les pastilles chiffrées prennent la couleur de la pastille de la ligne — rouge pour \
 ce qu'il reste à faire, violet pour le suivi des PR clôturées — et restent gris sur une ligne qui \

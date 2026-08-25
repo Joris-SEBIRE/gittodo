@@ -94,6 +94,11 @@ pour elle.
 - **⌘** maintenu : la ligne devient « Copier le lien ».
 - **⌘R** : actualise tout de suite.
 - Le point ● marque ce qui est arrivé depuis la dernière ouverture du menu.
+- Le visage d'une ligne n'est pas toujours l'auteur de la PR : les métadonnées disent qui c'est et
+  ce qu'il a fait, toujours sous la même forme — « créée par », « écrit par », « répondu par »,
+  « refusée par », « approuvée par », « confiée à », « réponse attendue de », « mergée par »,
+  « poussée par ». Tes propres PR disent « créée par @toi », comme les autres. Aucune ligne ne
+  reste sans visage.
 - Trois sortes de pastilles, et seulement trois. Chiffrée : elle décompose le compte de la ligne
   et prend sa couleur, rouge pour ce qu'il reste à faire, violet pour le suivi des PR clôturées.
   État de fin de PR : la couleur de GitHub, violet `mergée` ou rouge `fermée`, sans nombre.

@@ -99,7 +99,7 @@ CHROME_GLYPH = 11.0
 # Remontée optique des icônes de chrome. AppKit centre la boîte de l'image dans la ligne, alors
 # que l'encre d'un texte en capitales monte plus haut qu'elle ne descend : mesuré au pixel sur le
 # menu réel, l'icône tombait 0,75 à 2,25 pt sous le centre visuel du titre.
-CHROME_LIFT = 1.5
+CHROME_LIFT = 1.75
 # Marge de gauche commune aux icônes de chrome et aux vignettes des lignes : la même constante
 # pour les deux, sinon les deux colonnes se désaligneraient au premier réglage de l'une.
 LEFT_MARGIN = 6.0
@@ -171,7 +171,9 @@ COUNT_RESERVE = 5.0
 # Pile de visages : décalage, nombre maximum affiché, et cercle de séparation.
 STACK_STEP = 12.0
 STACK_MAX = 3
-RING_WIDTH = 1.2
+# Cercle de séparation de la pile : un nom à lui, sinon il écrase RING_WIDTH plus haut et
+# l'anneau de progression se retrouve peint à la largeur de la pile.
+STACK_RING = 1.2
 # Couleurs d'état de GitHub, la claire puis la sombre : le violet du merge et le rouge de la
 # fermeture sans merge. Reprendre les siennes plutôt que les couleurs système fait qu'une ligne
 # du menu dit la même chose, dans la même teinte, que la PR sur github.com.
@@ -270,37 +272,48 @@ def _chrome_symbol(name: str, tint: str = ""):
     des pannes prend celle de son niveau. Ces lignes ne sont jamais survolées, rien ne viendra
     donc contredire leur couleur.
     """
-    if (name, tint) not in _CHROME:
+    # Une teinte est cuite dans les pixels : sans l'apparence dans la clé, un passage
+    # clair/sombre garderait l'ancienne couleur jusqu'au redémarrage. Sans teinte l'image reste
+    # un gabarit, qu'AppKit reteint lui-même : la même dans les deux apparences.
+    skin = str(NSApplication.sharedApplication().effectiveAppearance().name()) if tint else ""
+    key = (name, tint, skin)
+    if key not in _CHROME:
         symbol = NSImage.imageWithSystemSymbolName_accessibilityDescription_(name, None)
         if symbol is None:
             return None
-        thin = symbol.imageWithSymbolConfiguration_(
-            NSImageSymbolConfiguration.configurationWithPointSize_weight_scale_(
-                CHROME_GLYPH, NSFontWeightLight, NSImageSymbolScaleSmall
+        canvas = None
+
+        def paint() -> None:
+            nonlocal canvas
+            thin = symbol.imageWithSymbolConfiguration_(
+                NSImageSymbolConfiguration.configurationWithPointSize_weight_scale_(
+                    CHROME_GLYPH, NSFontWeightLight, NSImageSymbolScaleSmall
+                )
             )
-        )
-        if tint:
-            thin = thin.imageWithSymbolConfiguration_(
-                NSImageSymbolConfiguration.configurationWithPaletteColors_([_colour(tint)])
+            if tint:
+                thin = thin.imageWithSymbolConfiguration_(
+                    NSImageSymbolConfiguration.configurationWithPaletteColors_([_colour(tint)])
+                )
+            span = thin.size()
+            # Image plus haute que le glyphe, glyphe dessiné vers le haut : centrer cette image
+            # revient à remonter le glyphe de CHROME_LIFT.
+            canvas = NSImage.alloc().initWithSize_(
+                NSMakeSize(span.width + LEFT_MARGIN, span.height + 2 * CHROME_LIFT)
             )
-        span = thin.size()
-        # Image plus haute que le glyphe, glyphe dessiné vers le haut : centrer cette image
-        # revient à remonter le glyphe de CHROME_LIFT.
-        canvas = NSImage.alloc().initWithSize_(
-            NSMakeSize(span.width + LEFT_MARGIN, span.height + 2 * CHROME_LIFT)
-        )
-        canvas.lockFocus()
-        thin.drawInRect_fromRect_operation_fraction_(
-            NSMakeRect(LEFT_MARGIN, 2 * CHROME_LIFT, span.width, span.height),
-            NSZeroRect,
-            NSCompositingOperationSourceOver,
-            1.0,
-        )
-        canvas.unlockFocus()
+            canvas.lockFocus()
+            thin.drawInRect_fromRect_operation_fraction_(
+                NSMakeRect(LEFT_MARGIN, 2 * CHROME_LIFT, span.width, span.height),
+                NSZeroRect,
+                NSCompositingOperationSourceOver,
+                1.0,
+            )
+            canvas.unlockFocus()
+
+        NSApplication.sharedApplication().effectiveAppearance().performAsCurrentDrawingAppearance_(paint)
         # Un gabarit se laisse teinter par AppKit ; une image déjà peinte doit garder sa couleur.
         canvas.setTemplate_(not tint)
-        _CHROME[(name, tint)] = canvas
-    return _CHROME[(name, tint)]
+        _CHROME[key] = canvas
+    return _CHROME[key]
 
 
 _LABELS: dict[tuple, object] = {}
@@ -313,19 +326,27 @@ def _red_label(text: str, height: float, radius: float, padding: float, font: fl
     repérable d'un coup d'œil dans une liste, comme les labels de GitHub. Une seule
     primitive pour l'étiquette de texte et pour la pastille de comptage, à la géométrie près.
     """
-    key = (text, height, radius, padding, font, tint)
+    # La couleur de fond est une couleur système : elle se résout sous l'apparence courante et
+    # se retrouve cuite dans les pixels. Sans l'apparence dans la clé, un passage clair/sombre
+    # garderait l'ancienne teinte jusqu'au redémarrage.
+    skin = str(NSApplication.sharedApplication().effectiveAppearance().name())
+    key = (text, height, radius, padding, font, tint, skin)
     if key not in _LABELS:
         glyph = _run(text, font, color=NSColor.whiteColor(), weight=NSFontWeightSemibold)
         measured = glyph.size()
         width = max(height, measured.width + padding)
         canvas = NSImage.alloc().initWithSize_(NSMakeSize(width, height))
-        canvas.lockFocus()
-        _colour(tint).setFill()
-        NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
-            NSMakeRect(0, 0, width, height), radius, radius
-        ).fill()
-        glyph.drawAtPoint_(((width - measured.width) / 2, (height - measured.height) / 2))
-        canvas.unlockFocus()
+
+        def paint() -> None:
+            canvas.lockFocus()
+            _colour(tint).setFill()
+            NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
+                NSMakeRect(0, 0, width, height), radius, radius
+            ).fill()
+            glyph.drawAtPoint_(((width - measured.width) / 2, (height - measured.height) / 2))
+            canvas.unlockFocus()
+
+        NSApplication.sharedApplication().effectiveAppearance().performAsCurrentDrawingAppearance_(paint)
         _LABELS[key] = canvas
     return _LABELS[key]
 
@@ -520,7 +541,7 @@ def _stack(faces, size: float):
         face.drawInRect_fromRect_operation_fraction_(box, NSZeroRect, NSCompositingOperationSourceOver, 1.0)
         NSColor.colorWithWhite_alpha_(0.55, 0.85).setStroke()
         ring = NSBezierPath.bezierPathWithOvalInRect_(box)
-        ring.setLineWidth_(RING_WIDTH)
+        ring.setLineWidth_(STACK_RING)
         ring.stroke()
     canvas.unlockFocus()
     return canvas
@@ -790,6 +811,12 @@ class GitTodoApp(NSObject):
         self.closures_at = None
         # Sources actuellement dégradées : le triangle et sa section en vivent.
         self.health: dict[str, dict] = {}
+        self.bar_shown = (0, False, "", 0)
+        # Date du cycle en cours : un cycle déclaré bloqué est abandonné, mais son fil
+        # continue de tourner. Sans cette date, sa réponse tardive écraserait le cycle
+        # qui a pris sa suite.
+        self.fetch_epoch = 0
+        self.fetch_local = threading.local()
         # Dernière gravité annoncée par GitHub, et quand on l'a demandée.
         self.service: tuple[str, str] = ("", "")
         self.service_at = None
@@ -821,6 +848,9 @@ class GitTodoApp(NSObject):
         # Garde-fou : un cycle qui ne rend jamais la main bloquerait tous les suivants.
         if self.fetching and self.fetch_started and (now() - self.fetch_started).total_seconds() > STUCK_AFTER:
             log_error("cycle bloqué au-delà du délai : drapeau relâché de force")
+            # Le fil est abandonné, pas tué : on change de date pour que sa réponse tardive
+            # soit ignorée au lieu d'écraser le cycle qui prend sa suite.
+            self.fetch_epoch += 1
             self.fetching = False
         self.maybe_refresh_branches()
         if self.menu_open:
@@ -866,16 +896,23 @@ class GitTodoApp(NSObject):
     def note_incident(self, source: str, trouble, kind: str = "") -> None:
         """Retient qu'une source ne répond pas, en gardant la date du premier échec."""
         known = self.health.get(source)
-        self.health[source] = {
+        entry = {
             "status": getattr(trouble, "status", None),
             "kind": kind or getattr(trouble, "kind", "erreur"),
             "message": str(trouble),
             "since": known["since"] if known else now(),
         }
+        # Remplacement du dictionnaire entier, jamais modification sur place : il est écrit
+        # par le fil de fond pendant que la boucle d'événements dessine le menu. Un rebind est
+        # indivisible ; une mutation fait lever « dictionary changed size » en plein parcours,
+        # et le menu se retrouve tronqué.
+        self.health = {**self.health, source: entry}
 
     @objc.python_method
     def clear_incident(self, source: str) -> None:
-        self.health.pop(source, None)
+        if source not in self.health:
+            return
+        self.health = {name: t for name, t in self.health.items() if name != source}
         if not self.health:
             self.service, self.service_at = ("", ""), None
 
@@ -890,19 +927,20 @@ class GitTodoApp(NSObject):
         self.service, self.service_at = service_status(), now()
 
     @objc.python_method
-    def level(self) -> str:
+    def level(self, health: dict | None = None) -> str:
         """Niveau de gravité : nos propres échecs croisés avec ce qu'annonce GitHub.
 
         Un quota épuisé ou un refus de droits ne sont pas des pannes de GitHub, quelle que soit
         la source touchée : les données sont figées, mais rien n'est cassé en face. La panne de
         la source principale, elle, arrête tout, et l'annonce officielle a le dernier mot.
         """
-        if not self.health:
+        health = self.health if health is None else health
+        if not health:
             return ""
         official = OFFICIAL.get(self.service[0], "")
         if official == "critique":
             return "critique"
-        broken = {name for name, t in self.health.items() if t["kind"] in ("panne", "réseau")}
+        broken = {name for name, t in health.items() if t["kind"] in ("panne", "réseau")}
         if "pull_requests" in broken:
             return "critique"
         if broken or official == "alerte":
@@ -998,13 +1036,14 @@ class GitTodoApp(NSObject):
             return
         self.fetching = True
         self.fetch_started = now()
+        self.fetch_epoch += 1
         # Animation quand l'utilisateur attend un contenu : démarrage, bascule d'identité,
         # actualisation manuelle. Pas sur le rafraîchissement automatique, qui ne doit pas
         # faire clignoter la barre toutes les cinq minutes.
         if spinner or self.snapshot.fetched_at is None:
             self.start_spinner()
         self.render()
-        threading.Thread(target=self._fetch_worker, daemon=True).start()
+        threading.Thread(target=self._fetch_worker, args=(self.fetch_epoch,), daemon=True).start()
 
     @objc.python_method
     def loading(self) -> bool:
@@ -1069,19 +1108,36 @@ class GitTodoApp(NSObject):
                 self.closures_at = None
 
     @objc.python_method
-    def _fetch_worker(self) -> None:
+    def _fetch_worker(self, epoch: int) -> None:
         """Enveloppe du cycle : le drapeau « en cours » doit retomber quoi qu'il arrive.
 
         Sans ce `finally`, une exception inattendue laisse l'app figée pour de bon : plus
         aucun cycle ne repart, et l'affichage reste crédible tout en étant périmé.
         """
+        self.fetch_local.epoch = epoch
         try:
             self._fetch_once()
         except Exception as exc:
             log_error(f"cycle interrompu : {type(exc).__name__}: {exc}\n{traceback.format_exc()}")
-            AppHelper.callAfter(self.apply_snapshot, self._failed(f"{type(exc).__name__}: {exc}"))
+            self.land(self.apply_snapshot, self._failed(f"{type(exc).__name__}: {exc}"))
         finally:
-            AppHelper.callAfter(self.release_fetch)
+            self.land(self.release_fetch)
+
+    @objc.python_method
+    def land(self, apply, *args) -> None:
+        """Fait remonter le résultat d'un cycle, refusé s'il n'est plus le cycle en cours.
+
+        Le garde-fou anti-blocage relâche le drapeau sans pouvoir tuer le fil parti : celui-ci
+        finit par répondre, longtemps après, et son instantané périmé écraserait le frais en se
+        parant d'une date neuve.
+        """
+        epoch = getattr(self.fetch_local, "epoch", 0)
+
+        def deliver() -> None:
+            if epoch == self.fetch_epoch:
+                apply(*args)
+
+        AppHelper.callAfter(deliver)
 
     @objc.python_method
     def release_fetch(self) -> None:
@@ -1106,10 +1162,10 @@ class GitTodoApp(NSObject):
             try:
                 signature, rate = self.client.fetch_signature()
             except GitHubError as exc:
-                AppHelper.callAfter(self.apply_snapshot, self._failed(str(exc)))
+                self.land(self.apply_snapshot, self._failed(str(exc)))
                 return
             if signature == self.signature:
-                AppHelper.callAfter(self.touch_snapshot, rate)
+                self.land(self.touch_snapshot, rate)
                 return
         try:
             signature, _ = "", None
@@ -1142,7 +1198,7 @@ class GitTodoApp(NSObject):
             snapshot = self._failed(f"{type(exc).__name__}: {exc}")
         if not snapshot.error:
             self.signature, self.last_full = signature, now()
-        AppHelper.callAfter(self.apply_snapshot, snapshot)
+        self.land(self.apply_snapshot, snapshot)
         # Les photos arrivent après le badge : le menu est reconstruit à chaque ouverture.
         if not snapshot.error:
             faces = {item.avatar for item in snapshot.items} | {person.avatar for person in snapshot.people}
@@ -1341,7 +1397,10 @@ class GitTodoApp(NSObject):
         suivi = summarize_closed(lignes)
         # Une recherche écrêtée rend le compte inférieur à la réalité : le « + » le dit.
         badge = _capped(count, bool(self.snapshot.truncated)) if count else ""
-        shown = self.draw_badge(count, urgent, badge)
+        # Retenu tel quel pour l'animation de l'anneau : elle repeint chaque seconde et n'a
+        # aucune raison de refaire le tri des lignes, ni de perdre le « + » en chemin.
+        self.bar_shown = (count, urgent, badge, suivi)
+        shown = self.draw_badge(count, urgent, badge, suivi)
         who = f" (vu en tant que @{self.snapshot.identity})" if self.snapshot.impersonating else ""
         tip = f"GitTodo — {count} chose(s) à faire{who}" if count else f"GitTodo — rien à faire{who}"
         if suivi:
@@ -1350,7 +1409,7 @@ class GitTodoApp(NSObject):
             # L'erreur n'encombre pas la pastille : elle est dans le survol et dans le menu.
             tip = f"GitTodo — {truncate(self.snapshot.error, 80)}"
         self.status_item.button().setToolTip_(tip)
-        visible = not (self.cfg.hide_when_zero and count == 0 and not self.snapshot.error)
+        visible = not (self.cfg.hide_when_zero and count == 0 and not suivi and not self.snapshot.error)
         self.status_item.setVisible_(visible)
         write_status(
             {
@@ -1380,11 +1439,12 @@ class GitTodoApp(NSObject):
         """
         if self.status_item is None or self.loading():
             return
-        count, urgent = summarize(self.visible())
-        self.draw_badge(count, urgent, str(count) if count else "")
+        # Le compte vient du dernier cycle : le recalculer chaque seconde coûterait deux
+        # parcours complets des lignes pour une image qui n'avance que d'un degré.
+        self.draw_badge(*self.bar_shown)
 
     @objc.python_method
-    def draw_badge(self, count: int, urgent: bool, badge: str) -> dict:
+    def draw_badge(self, count: int, urgent: bool, badge: str, suivi: int = 0) -> dict:
         """Peint l'élément de la barre et décrit ce qui a été affiché."""
         button = self.status_item.button()
         if self.cfg.badge_style == "avatar":
@@ -1395,7 +1455,6 @@ class GitTodoApp(NSObject):
                 ring = self.cfg.show_refresh_ring
                 base = _with_ring(photo, self.progress()) if ring else photo
                 span = RING_SIZE if ring else BAR_SIZE
-                suivi = summarize_closed(self.visible())
                 portrait = _bar_image(
                     base, badge, str(suivi) if suivi else "", self.level(), span
                 )
@@ -1544,15 +1603,18 @@ class GitTodoApp(NSObject):
 
         En tête du menu, parce que tout ce qui suit doit être lu en sachant qu'il est partiel.
         """
-        if not self.health:
+        # Une seule vue du dictionnaire pour toute la section : le fil de fond peut le vider
+        # entre le test et le calcul du niveau, et `LEVELS[""]` lèverait en plein dessin.
+        health = self.health
+        if not health:
             return
-        level = self.level()
+        level = self.level(health)
         title, _ = LEVELS[level]
         # Le triangle des lignes est centré dans la même boîte que les avatars ; celui du titre
         # de section reste à la taille du chrome, comme tous les autres titres.
         badge = _row_image(_alert_symbol(level, ALERT_SIZE))
         header = NSMenuItem.alloc().init()
-        header.setAttributedTitle_(_header(f"{title} ({len(self.health)})", LEVELS[level][1]))
+        header.setAttributedTitle_(_header(f"{title} ({len(health)})", LEVELS[level][1]))
         header.setImage_(_chrome_symbol("exclamationmark.triangle.fill", LEVELS[level][1]))
         header.setEnabled_(False)
         menu.addItem_(header)
@@ -1565,7 +1627,7 @@ class GitTodoApp(NSObject):
                 _row_image(_boxed_symbol("bolt.horizontal.circle")),
             )
             menu.addItem_(official)
-        for source, trouble in sorted(self.health.items()):
+        for source, trouble in sorted(health.items()):
             label, effet = SOURCES.get(source, (source, ""))
             kind = trouble["kind"]
             code = f"HTTP {trouble['status']}" if trouble.get("status") else CODES.get(kind, kind)

@@ -429,14 +429,25 @@ class SettingsForm(NSObject):
         return replace(self.cfg, **values)
 
     @objc.python_method
+    def authored(self) -> list:
+        """Champs que ce formulaire sait exprimer : lui seul a le droit de les écrire."""
+        return [*self.widgets]
+
+    @objc.python_method
     def changed(self) -> bool:
         current = self.collect()
-        return any(not _same(getattr(current, name), getattr(self.cfg, name)) for name in self.widgets)
+        return any(not _same(getattr(current, name), getattr(self.cfg, name)) for name in self.authored())
 
     @objc.python_method
     def commit(self) -> Config:
-        """Écrit le fichier, puis prend la configuration enregistrée pour nouvelle référence."""
-        saved = self.collect()
+        """Écrit le fichier, puis prend la configuration enregistrée pour nouvelle référence.
+
+        Les champs sans contrôle sont relus du fichier au moment d'écrire, jamais gardés de
+        l'ouverture : ils se changent aussi depuis le menu, et une fenêtre restée ouverte les
+        ferait revenir en arrière en enregistrant tout le reste.
+        """
+        described = self.collect()
+        saved = replace(Config.load(), **{name: getattr(described, name) for name in self.authored()})
         saved.save()
         self.cfg = saved
         for name in self.widgets:

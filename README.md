@@ -108,8 +108,10 @@ pour elle.
 - Le bouclier, devant le nom de la branche, marque une review obligatoire encore en attente :
   CODEOWNERS l'a demandée, elle ne peut pas être contournée. Il tient cette ligne parce que la
   protection porte sur la branche visée. L'infobulle dit de qui la review est attendue.
-- Un compte suivi d'un `+` est un plancher : la liste est écrêtée, ou une recherche a buté sur sa
-  limite. Sans `+`, le compte est exact, même s'il tombe pile sur le plafond.
+- Dans un titre de section, un compte suivi d'un `+` est un plancher : la liste est écrêtée, ou
+  une recherche a buté sur sa limite. Sans `+`, le compte est exact, même s'il tombe pile sur le
+  plafond. La pastille de la barre, elle, ne porte jamais de `+` : elle donne le nombre, et c'est
+  le menu qui nomme ce qui a été écrêté.
 - Un anneau se remplit autour de la photo, dans le sens horaire, jusqu'au prochain cycle : le
   délai avant la prochaine lecture se voit sans ouvrir le menu.
 - Une pastille violette en bas à gauche de la photo suit les PR sorties du périmètre ouvert :

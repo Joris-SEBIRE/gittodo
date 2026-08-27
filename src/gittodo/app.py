@@ -1395,8 +1395,11 @@ class GitTodoApp(NSObject):
         lignes = self.visible()
         count, urgent = summarize(lignes)
         suivi = summarize_closed(lignes)
-        # Une recherche écrêtée rend le compte inférieur à la réalité : le « + » le dit.
-        badge = _capped(count, bool(self.snapshot.truncated)) if count else ""
+        # La pastille de la barre ne porte que le nombre. Un « + » y tiendrait sur 8 pt de haut
+        # sans se lire, et il resterait allumé en permanence dès que la boîte des non-lues est
+        # écrêtée, ce qui est l'état normal d'un compte bruyant : un modificateur toujours vrai
+        # n'apprend rien. L'écrêtage est dit dans le menu, qui a la place d'en nommer la source.
+        badge = str(count) if count else ""
         # Retenu tel quel pour l'animation de l'anneau : elle repeint chaque seconde et n'a
         # aucune raison de refaire le tri des lignes, ni de perdre le « + » en chemin.
         self.bar_shown = (count, urgent, badge, suivi)

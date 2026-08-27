@@ -190,9 +190,11 @@ section, les sections d'action à la pastille de la barre. `_item()` déduit le 
 décomposition
 - le titre d'une section qui regarde une fenêtre de temps la porte, écrite comme les délais des \
 lignes : deux plus grandes unités consécutives, donc « 1 mois » pour trente jours réglés
-- un compte suivi d'un `+` est un plancher, pas un total : la liste est écrêtée, ou une recherche \
-a buté sur `max_per_search`. Sans `+`, le compte est exact, y compris quand il tombe pile sur le \
-plafond
+- dans un titre de section, un compte suivi d'un `+` est un plancher, pas un total : la liste est \
+écrêtée, ou une recherche a buté sur `max_per_search`. Sans `+`, le compte est exact, y compris \
+quand il tombe pile sur le plafond. La pastille de la barre ne porte jamais de `+` : à sa taille \
+il ne se lirait pas, et il resterait allumé en permanence dès que la boîte des non-lues est \
+écrêtée. C'est le menu qui nomme la source écrêtée, en bas
 - jamais affiché : une PR hors `is:open`, le draft d'un autre, une branche dont la PR est \
 `MERGED` sans commit en avance, une branche avec une PR `OPEN`, la branche par défaut
 

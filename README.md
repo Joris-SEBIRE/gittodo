@@ -99,10 +99,10 @@ pour elle.
   « refusée par », « approuvée par », « confiée à », « réponse attendue de », « mergée par »,
   « poussée par ». Tes propres PR disent « créée par @toi », comme les autres. Aucune ligne ne
   reste sans visage.
-- Trois sortes de pastilles, et seulement trois. Chiffrée : elle décompose le compte de la ligne
-  et prend sa couleur, rouge pour ce qu'il reste à faire, violet pour le suivi des PR clôturées.
-  État de fin de PR : la couleur de GitHub, violet `mergée` ou rouge `fermée`, sans nombre.
-  Drapeau d'état : gris, sans nombre.
+- Trois sortes de pastilles, et seulement trois. Chiffrée : elle prend la couleur de la ligne,
+  rouge pour ce qu'il reste à faire, violet pour le suivi des PR clôturées, grise sur une ligne
+  informative — le nombre dit alors combien, pas quoi faire. État de fin de PR : la couleur de
+  GitHub, violet `mergée` ou rouge `fermée`, sans nombre. Drapeau d'état : gris, sans nombre.
 - Le délai « depuis X » prend la couleur de la pastille de la ligne, et reste gris quand la ligne
   ne compte rien.
 - Le bouclier, devant le nom de la branche, marque une review obligatoire encore en attente :

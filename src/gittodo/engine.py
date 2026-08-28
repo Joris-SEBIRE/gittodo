@@ -217,7 +217,8 @@ def _item(
 
     `counted` porte les pastilles chiffrées, celles qui décomposent la pastille rouge. Le
     poids en est déduit, ce qui garantit par construction que les nombres de la ligne
-    s'additionnent jusqu'au badge. Une action sans décomposition compte pour elle-même,
+    s'additionnent jusqu'au badge. Sur une ligne informative, qui ne pèse rien par définition,
+    ces nombres restent affichés mais en gris : ils disent combien, pas quoi faire. Une action sans décomposition compte pour elle-même,
     avec l'icône de sa catégorie. `status` porte l'état de la PR, qui vient juste après les
     nombres parce qu'il vaut pour toute la ligne. Les drapeaux d'état viennent après, sans nombre.
     """
@@ -279,7 +280,9 @@ def _messages(
     to_answer: list[tuple[Comment, bool]] = []
     to_check: list[tuple[Comment, bool]] = []
     awaited: dict[str, Comment] = {}
-    portraits: dict[str, str] = {}
+    # Mes messages restés sans retour, un par conversation, avec leur nature : de quoi les
+    # compter comme on compte ceux qui m'attendent.
+    unanswered_mine: list[tuple[Comment, bool]] = []
 
     def collect(humans: list[Comment], opener: str, on_code: bool = True) -> None:
         last = humans[-1]
@@ -289,7 +292,6 @@ def _messages(
         silent = me not in speakers and not mine
         if silent and not any(_names(c.body, me) for c in humans):
             return
-        portraits.update({c.author: c.avatar for c in humans if c.avatar})
         # Un fil de code est une conversation : y répondre répond au fil. La discussion générale
         # est une liste plate, où seule une citation dit à quoi on répond.
         pending = (
@@ -306,6 +308,7 @@ def _messages(
             # On attend l'autre partie : l'auteur sur la PR d'autrui, le reviewer sur la mienne.
             # Tous ceux dont on attend une réponse, pas seulement le premier : la ligne montre
             # leurs visages, et l'infobulle les nomme.
+            unanswered_mine.append((last, on_code))
             for other in sorted(speakers - {me}) or ([pr.author] if not mine else []):
                 awaited.setdefault(other, last)
 
@@ -350,13 +353,18 @@ def _messages(
     add(Kind.REPLIES_TO_CHECK, to_check, "dans des fils que tu as ouverts, à vérifier puis résoudre", "répondu par")
     if awaited and not items:
         who, last = min(awaited.items(), key=lambda pair: pair[1].created_at)
+        noms = ", ".join("@" + name for name in sorted(awaited))
+        on_code = sum(1 for _, code in unanswered_mine if code)
         items.append(
             _item(
                 pr, Kind.WAITING_REPLY, pr.id, last.created_at, last.url,
-                by="réponse attendue de " + ", ".join("@" + name for name in sorted(awaited)),
-                avatar=portraits.get(who) or "",
-                faces=tuple(portraits[name] for name in sorted(awaited) if portraits.get(name)),
-                hint=f"tu as parlé en dernier, tu attends {', '.join('@' + n for n in sorted(awaited))}",
+                # Les mêmes glyphes que les messages qui m'attendent, avec les mêmes nombres :
+                # seule la couleur distingue, grise ici puisque rien n'est attendu de moi.
+                counted=((ON_CODE, on_code), (IN_DISCUSSION, len(unanswered_mine) - on_code)),
+                by=f"réponse attendue de {noms}",
+                avatar=pr.portraits.get(who) or pr.avatar,
+                faces=tuple(pr.portraits[name] for name in sorted(awaited) if pr.portraits.get(name)),
+                hint=f"{len(unanswered_mine)} message(s) de toi sans retour, tu attends {noms}",
             )
         )
     return items

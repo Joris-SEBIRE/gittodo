@@ -223,8 +223,10 @@ ne compte rien. Les drapeaux d'état, eux, ne comptent rien et gardent leur gris
 l'information qu'on cherche en premier sur une ligne qui attend ; les pastilles chiffrées disent \
 de quoi son compte est fait.
 
-Il y a donc trois sortes de pastilles, et seulement trois. Chiffrée : elle décompose le compte \
-de la ligne et prend sa couleur. État de fin de PR, sur une ligne clôturée : le glyphe et la \
+Il y a donc trois sortes de pastilles, et seulement trois. Chiffrée : elle prend la couleur de \
+la ligne, et reste grise sur une ligne informative — « 11 » messages sans retour se comptent \
+comme les messages qui attendent ta réponse, avec les mêmes glyphes, mais rien n'est attendu de \
+toi et le nombre ne va dans aucun badge. État de fin de PR, sur une ligne clôturée : le glyphe et la \
 couleur que GitHub lui donne, violet `mergée` ou rouge `fermée`, sans nombre, parce qu'elle dit \
 ce qu'est devenue la PR et non ce qu'il reste à faire. Drapeau d'état : gris, sans nombre.
 

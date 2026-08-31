@@ -12,6 +12,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from . import codeowners
 from .config import CONFIG_PATH, Config
 from .models import Branch, Closure, Comment, Person, PullRequest, Review, Thread, parse_ts
 from .queries import (
@@ -27,12 +28,15 @@ from .queries import (
 
 API = "https://api.github.com"
 EPOCH = datetime.fromtimestamp(0, tz=timezone.utc)
-# Lots d'alias : le test « a-t-elle eu une PR ? » est léger, la résolution du dernier
 # Boîte des non-lues : l'API plafonne à 50 par page quoi qu'on demande, et dix pages
 # couvrent les comptes très bruyants (mesuré : 424 non lues, la seule mention en page 6).
 NOTIFICATION_PAGE_SIZE = 50
 NOTIFICATION_PAGES = 10
-# commit l'est beaucoup moins et dépasse les limites de ressources si le lot est gros.
+# Chemins modifiés lus par PR pour rejouer CODEOWNERS : au-delà, une PR est de toute façon
+# trop large pour qu'un propriétaire ne soit pas déjà concerné.
+OWNER_FILES = 100
+# Lots d'alias : le test « a-t-elle eu une PR ? » est léger, la résolution du dernier commit
+# l'est beaucoup moins et dépasse les limites de ressources si le lot est gros.
 BRANCH_PR_BATCH = 120
 BRANCH_REF_BATCH = 40
 MAX_BRANCH_PAGES = 10
@@ -489,6 +493,64 @@ class GitHub:
                 if closure is not None:
                     vus.setdefault(closure.pr.id, closure)
         return list(vus.values()), (data.get("rateLimit") or {}).get("remaining")
+
+    def fetch_code_owners(self, prs: list[PullRequest]) -> dict[str, tuple[str, ...]]:
+        """Propriétaires dont la review sera obligatoire, pour les PR où GitHub ne l'a pas dit.
+
+        GitHub ne pose ses demandes `asCodeOwner` qu'à l'ouverture d'une PR : sur un draft, la
+        liste est vide alors que la review sera bel et bien exigée. On rejoue donc la règle du
+        dépôt sur les fichiers modifiés. Là où GitHub s'est prononcé, on ne le refait pas : sa
+        liste est la vérité, puisqu'elle sait aussi qui a déjà rendu son avis.
+
+        Mesuré à 1 point pour une douzaine de PR et leurs dépôts : le fichier de règles et les
+        chemins modifiés tiennent dans la même requête d'alias.
+        """
+        if not prs:
+            return {}
+        repos = sorted({pr.repo for pr in prs})
+        blocks = []
+        for index, repo in enumerate(repos):
+            owner, _, name = repo.partition("/")
+            candidates = " ".join(
+                f'c{rank}: object(expression:{json.dumps("HEAD:" + path)}) {{ ... on Blob {{ text }} }}'
+                for rank, path in enumerate(codeowners.PATHS)
+            )
+            blocks.append(
+                f"  r{index}: repository(owner:{json.dumps(owner)}, name:{json.dumps(name)}) {{ {candidates} }}"
+            )
+        for index, pr in enumerate(prs):
+            owner, _, name = pr.repo.partition("/")
+            blocks.append(
+                f"  p{index}: repository(owner:{json.dumps(owner)}, name:{json.dumps(name)}) {{ "
+                f"pullRequest(number:{pr.number}) {{ files(first:{OWNER_FILES}) {{ nodes {{ path }} }} }} }}"
+            )
+        data = self.graphql("query {\n" + "\n".join(blocks) + "\n}", {})
+        rules = {}
+        for index, repo in enumerate(repos):
+            block = data.get(f"r{index}") or {}
+            text = next(
+                ((block.get(f"c{rank}") or {}).get("text") for rank in range(len(codeowners.PATHS))
+                 if (block.get(f"c{rank}") or {}).get("text")),
+                "",
+            )
+            rules[repo] = codeowners.parse(text)
+        found: dict[str, tuple[str, ...]] = {}
+        for index, pr in enumerate(prs):
+            node = ((data.get(f"p{index}") or {}).get("pullRequest") or {})
+            paths = [f["path"] for f in ((node.get("files") or {}).get("nodes") or [])]
+            owners = set(codeowners.owners(paths, rules.get(pr.repo, ())))
+            # Les mêmes exclusions que GitHub applique à ses propres demandes, sans quoi les
+            # deux listes ne voudraient pas dire la même chose : jamais l'auteur, et plus
+            # personne qui a déjà rendu son avis.
+            owners -= {pr.author} | {review.author for review in pr.reviews}
+            if owners:
+                found[pr.id] = tuple(sorted(owners))
+        return found
+
+    def with_code_owners(self, prs: list[PullRequest]) -> list[PullRequest]:
+        """Les mêmes PR, complétées des propriétaires que GitHub n'a pas encore sollicités."""
+        found = self.fetch_code_owners([pr for pr in prs if not pr.code_owners])
+        return [replace(pr, code_owners=found[pr.id]) if pr.id in found else pr for pr in prs]
 
     def fetch_notifications(self) -> tuple[list[dict], str]:
         """Boîte des non-lues, paginée : une mention peut être très loin dans la pile.

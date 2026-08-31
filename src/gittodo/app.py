@@ -122,6 +122,7 @@ SOURCES = {
     "mentions": ("sujets des mentions", "une mention fermée peut rester affichée"),
     "branches": ("branches distantes", "les branches peuvent être périmées"),
     "closed": ("suivi des PR clôturées", "une clôture ou un message tardif peut manquer"),
+    "code_owners": ("règles CODEOWNERS", "le bouclier peut manquer sur un draft"),
     "people": ("annuaire de l'organisation", "« voir en tant que » est incomplet"),
 }
 # Triangle d'avertissement posé à la place de la pastille de comptage : le rouge de la pastille
@@ -1170,6 +1171,14 @@ class GitTodoApp(NSObject):
         try:
             signature, _ = "", None
             prs, viewer, rate, truncated = self.client.fetch_pull_requests()
+            # GitHub ne sollicite les propriétaires qu'à l'ouverture d'une PR : sur un draft,
+            # on rejoue CODEOWNERS pour dire le bouclier d'avance. Une panne de ce complément
+            # ne coûte que le bouclier, pas le cycle.
+            try:
+                prs = self.client.with_code_owners(prs)
+                self.clear_incident("code_owners")
+            except GitHubError as exc:
+                self.note_incident("code_owners", exc)
             signature = signature_of({pr.id: pr.updated_at for pr in prs})
             identity = self.cfg.view_as or viewer
             if not self.people:
@@ -1201,7 +1210,9 @@ class GitTodoApp(NSObject):
         self.land(self.apply_snapshot, snapshot)
         # Les photos arrivent après le badge : le menu est reconstruit à chaque ouverture.
         if not snapshot.error:
-            faces = {item.avatar for item in snapshot.items} | {person.avatar for person in snapshot.people}
+            faces = {
+                face for item in snapshot.items for face in (item.avatar, *item.faces)
+            } | {person.avatar for person in snapshot.people}
             self.avatars.prefetch({face for face in faces if face})
 
     @objc.python_method
@@ -1375,7 +1386,9 @@ class GitTodoApp(NSObject):
         if histoire and not self.state.knows_closed():
             self.state.mark_opened(histoire)
         return [
-            replace(item, weight=0)
+            # Le nombre part avec le poids : sur une ligne d'histoire déjà lue il ne décompose
+            # plus rien. Les pastilles sans nombre restent, elles disent ce qu'est devenue la PR.
+            replace(item, weight=0, chips=tuple(chip for chip in item.chips if not chip[1].isdigit()))
             if item.kind is Kind.RECENTLY_CLOSED and self.state.is_opened(item)
             else item
             for item in items

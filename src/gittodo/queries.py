@@ -54,7 +54,7 @@ fragment PR on PullRequest {
   author { __typename login avatarUrl(size: 64) }
   reviewDecision mergeable
   reviewRequests(first:20){ nodes { asCodeOwner requestedReviewer {
-    __typename ... on User{login avatarUrl(size: 64)} ... on Team{slug} } } }
+    __typename ... on User{login avatarUrl(size: 64)} ... on Team{slug avatarUrl(size: 64)} } } }
   reviews(last:20){ totalCount nodes { author { login avatarUrl(size: 64) } state submittedAt } }
   commits(last:1){ nodes { commit { committedDate statusCheckRollup { state } } } }
   reviewThreads(first:30){

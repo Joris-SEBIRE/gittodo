@@ -27,6 +27,10 @@ def dump(argv: list[str]) -> int:
     client = GitHub(cfg)
     try:
         prs, viewer, rate, truncated = client.fetch_pull_requests()
+        try:
+            prs = client.with_code_owners(prs)
+        except GitHubError as exc:
+            print(f"(règles CODEOWNERS indisponibles : {exc})")
         identity = cfg.view_as or viewer
         notifications = []
         if cfg.include_mentions and identity == viewer:

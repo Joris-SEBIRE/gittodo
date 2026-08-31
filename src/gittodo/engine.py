@@ -309,7 +309,13 @@ def _messages(
             # Tous ceux dont on attend une réponse, pas seulement le premier : la ligne montre
             # leurs visages, et l'infobulle les nomme.
             unanswered_mine.append((last, on_code))
-            for other in sorted(speakers - {me}) or ([pr.author] if not mine else []):
+            # Personne d'autre n'a parlé : sur la PR d'autrui c'est son auteur qu'on attend,
+            # sur la mienne les reviewers sollicités — sans quoi ma question posée à un
+            # reviewer muet ne serait suivie nulle part.
+            others = sorted(speakers - {me}) or (
+                [pr.author] if not mine else [r.lstrip("@") for r in pr.reviewers]
+            )
+            for other in others:
                 awaited.setdefault(other, last)
 
     for thread in pr.threads:
@@ -383,9 +389,12 @@ def _mine_items(pr: PullRequest, me: str, cfg: Config, talk: list[Item]) -> list
         # Le visage suit `who` quand il est renseigné : ce sont eux qu'on voit, c'est donc eux
         # que la ligne doit nommer.
         named = f"{by} " + ", ".join("@" + name for name in who) if who and by else f"créée par @{pr.author}"
+        # La photo principale est celle de la première personne nommée : sinon la ligne
+        # affiche mon visage en disant « confiée à @alice », et se lit à l'envers.
+        seen = next((pr.portraits[name] for name in who if pr.portraits.get(name)), pr.avatar)
         items.append(
             _item(
-                pr, kind, pr.id, pr.updated_at, avatar=pr.avatar, urgent=urgent, hint=hint, note=note,
+                pr, kind, pr.id, pr.updated_at, avatar=seen, urgent=urgent, hint=hint, note=note,
                 by=named,
                 faces=tuple(pr.portraits[name] for name in who if pr.portraits.get(name)),
             )
@@ -422,12 +431,15 @@ def _mine_items(pr: PullRequest, me: str, cfg: Config, talk: list[Item]) -> list
         return items  # déjà listée : ne pas la répéter en informatif
     # Rien à faire : la PR me concerne quand même, on la garde sous les yeux.
     if pr.is_draft:
-        conflict = pr.mergeable == "CONFLICTING"
-        add(
-            Kind.DRAFT,
-            "draft : rien n'est attendu de toi tant qu'il n'est pas ouvert"
-            + (f" — mais il est en conflit avec {pr.base}" if conflict else ""),
-        )
+        raisons = ["draft : rien n'est attendu de toi tant qu'il n'est pas ouvert"]
+        if pr.mergeable == "CONFLICTING":
+            raisons.append(f"mais il est en conflit avec {pr.base}")
+        # Sur un draft, GitHub n'a encore rien demandé : c'est nous qui rejouons CODEOWNERS,
+        # et le dire ici est utile puisque c'est au moment d'ouvrir la PR que ça compte.
+        if pr.code_owners:
+            noms = ", ".join("@" + owner.lstrip("@") for owner in pr.code_owners)
+            raisons.append(f"et la review de {noms} sera obligatoire à l'ouverture")
+        add(Kind.DRAFT, " — ".join(raisons))
     elif pr.reviewers:
         add(
             Kind.WAITING_REVIEW,
@@ -527,7 +539,11 @@ def _mention_items(notifications: list[dict], known_urls: set[str], me: str) -> 
                 fingerprint=f"{note.get('id')}:{note.get('updated_at')}",
                 repo=repo,
                 chips=((GROUPS[Kind.MENTION].symbol, "1"),),
-                hint=f"tu es mentionné dans {short_repo(repo)}",
+                hint=(
+                    f"@{author} t'a nommé dans {short_repo(repo)}"
+                    if author
+                    else f"tu es mentionné dans {short_repo(repo)}"
+                ),
             )
         )
     return items
@@ -567,6 +583,7 @@ def branch_items(branches: list, portraits: dict[str, str] | None = None, me: st
                 repo=branch.repo,
                 weight=0,
                 chips=(("arrow.triangle.branch", ""),) if branch.status == "DIVERGED" else (),
+                route=f"{branch.name} → {branch.base}" if branch.base else "",
                 hint=(
                     f"{branch.note} — plus rien à en tirer, la supprimer"
                     if branch.obsolete
@@ -611,7 +628,9 @@ def closed_items(closures: list[Closure], me: str, cfg: Config) -> list[Item]:
             # n'y répondra plus.
             if item.kind is Kind.WAITING_REPLY:
                 continue
-            actions.append(replace(item, closed=True, detail=join(item.detail, par)))
+            actions.append(
+                replace(item, closed=True, detail=join(item.detail, par), chips=item.chips + (etat,))
+            )
         if pr.author != me or closure.at < depuis:
             continue  # l'histoire, c'est celle de mes PR, dans la fenêtre annoncée
         histoire.append(

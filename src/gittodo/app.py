@@ -108,9 +108,12 @@ GLYPH_CHIP = 10.0
 GLYPH_ROUTE = 9.0
 # Étiquette de texte (« conflit ») et pastille de comptage : même primitive, deux géométries.
 TAG_HEIGHT, TAG_RADIUS, TAG_PADDING = 13.0, 3.0, 10.0
-COUNT_HEIGHT, COUNT_RADIUS, COUNT_PADDING = 10.0, 5.0, 4.0
+# Pastille de comptage : le rayon vaut la moitié de la hauteur, donc un chiffre seul y tient
+# dans un cercle parfait. Monter la police impose de monter la hauteur avec elle, sinon le
+# chiffre touche le bord.
+COUNT_HEIGHT, COUNT_RADIUS, COUNT_PADDING = 11.0, 5.5, 4.0
 LABEL_FONT = 9.0
-COUNT_FONT = 8.0
+COUNT_FONT = 9.0
 # Recouvrement de la pastille sur la photo : franc, pour qu'elle dépasse à peine et laisse le
 # texte se rapprocher de la vignette.
 COUNT_OVERLAP = 8.0
@@ -167,8 +170,9 @@ DELAY = re.compile(r"^(?:depuis |il y a )|^à l'instant$")
 FACE_GAP = 3.0
 # Place réservée à la pastille de comptage, occupée ou non : la zone de tête garde ainsi la même
 # largeur d'une ligne à l'autre, et le texte ne se déplace pas quand un compte apparaît. Elle
-# reste courte parce que la pastille mord franchement sur la photo, à la façon d'un badge.
-COUNT_RESERVE = 5.0
+# reste courte parce que la pastille mord franchement sur la photo, à la façon d'un badge, et
+# vaut le débord d'un compte à deux chiffres, qui est le plus large qu'une ligne porte en usage.
+COUNT_RESERVE = 6.0
 # Pile de visages : décalage, nombre maximum affiché, et cercle de séparation.
 STACK_STEP = 12.0
 STACK_MAX = 3

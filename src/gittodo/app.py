@@ -1681,7 +1681,10 @@ class GitTodoApp(NSObject):
         if menu.numberOfItems():
             menu.addItem_(NSMenuItem.separatorItem())
         plafond = max(1, self.cfg.closed_history_rows if kind is Kind.RECENTLY_CLOSED else MAX_ROWS_PER_GROUP)
-        montrees = items[:plafond]
+        # L'ordre de la section ne bouge pas : c'est sa chronologie qui la rend lisible. Un
+        # compte évincé par l'écrêtage n'est donc pas remonté, il est reporté sur la ligne
+        # d'écrêtage, où il continue de s'additionner jusqu'au badge.
+        montrees, cachees = items[:plafond], items[plafond:]
         # Le compte porte sur ce qui est affiché, et un « + » dit qu'il en reste derrière : un
         # nombre à son plafond ne le dit pas de lui-même. Les sections actionnables comptent
         # leurs notifications, pas leurs lignes, parce que c'est ce total qui monte jusqu'au badge.
@@ -1697,8 +1700,19 @@ class GitTodoApp(NSObject):
         menu.addItem_(header)
         for item in montrees:
             self.add_row(menu, item)
-        if len(items) > plafond:
-            self.add_info(menu, f"{len(items) - plafond} de plus, non affichés", "ellipsis")
+        if cachees:
+            # Le reste des badges est porté par cette ligne, chaque nombre dans la couleur du
+            # badge auquel il va : la somme des pastilles visibles, celle-ci comprise, vaut
+            # toujours le badge, sans avoir à toucher à l'ordre des lignes.
+            restes = tuple(
+                (group.symbol, str(poids), teinte)
+                for poids, teinte in (
+                    (sum(item.weight for item in cachees if not item.closed), "systemRedColor"),
+                    (sum(item.weight for item in cachees if item.closed), SECOND_TINT),
+                )
+                if poids
+            )
+            self.add_info(menu, f"{len(cachees)} de plus, non affichés", "ellipsis", restes)
 
     @objc.python_method
     def add_row(self, menu, item: Item) -> None:
@@ -1759,9 +1773,15 @@ class GitTodoApp(NSObject):
         return entry
 
     @objc.python_method
-    def add_info(self, menu, text: str, symbol: str = ""):
+    def add_info(self, menu, text: str, symbol: str = "", chips=()):
         info = NSMenuItem.alloc().init()
-        info.setAttributedTitle_(_note(text))
+        title = NSMutableAttributedString.alloc().initWithAttributedString_(
+            _note(text + ("   " if chips else ""))
+        )
+        if chips:
+            # Chaque pastille nomme sa propre couleur, donc pas de teinte de ligne à passer.
+            title.appendAttributedString_(_chip_run(chips))
+        info.setAttributedTitle_(title)
         if symbol:
             info.setImage_(_chrome_symbol(symbol))
         info.setEnabled_(False)

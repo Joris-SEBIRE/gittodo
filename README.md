@@ -79,6 +79,7 @@ d'emploi**, champ *Qualificateurs de recherche*, par exemple `org:mon-organisati
 Le token est cherché dans cet ordre, au premier trouvé :
 
 - le réglage `token_command`, une commande qui imprime un token sur sa sortie standard ;
+- le trousseau macOS, service `gittodo` ;
 - le fichier `~/.config/gittodo/token` ;
 - la variable d'environnement `GITHUB_TOKEN`, sinon `GH_TOKEN` ;
 - `gh auth token`, donc le compte de ton `gh auth login`.
@@ -93,6 +94,9 @@ pour elle.
   activité sur GitHub. Le masquage est local, rien n'est écrit sur GitHub.
 - **⌘** maintenu : la ligne devient « Copier le lien ».
 - **⌘R** : actualise tout de suite.
+- Le token peut se coller dans le champ **Token GitHub** de la fenêtre de réglages : ⌘V y
+  fonctionne, « Enregistrer » le range dans le trousseau et l'essaie aussitôt, et le bandeau du
+  bas dit le compte auquel il donne accès ou la raison du refus.
 - Le point ● marque ce qui est arrivé depuis la dernière ouverture du menu.
 - Le visage d'une ligne n'est pas toujours l'auteur de la PR : les métadonnées disent qui c'est et
   ce qu'il a fait, toujours sous la même forme — « créée par », « écrit par », « répondu par »,

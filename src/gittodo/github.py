@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import getpass
 import json
 import os
 import shutil
@@ -41,6 +42,7 @@ BRANCH_PR_BATCH = 120
 BRANCH_REF_BATCH = 40
 MAX_BRANCH_PAGES = 10
 GH_CANDIDATES = ["/opt/homebrew/bin/gh", "/usr/local/bin/gh", "/usr/bin/gh"]
+KEYCHAIN_SERVICE = "gittodo"
 TOKEN_FILE = CONFIG_PATH.parent / "token"
 
 
@@ -74,12 +76,31 @@ class GitHubError(Exception):
         return "erreur"
 
 
-def _run(cmd: list[str]) -> str | None:
+def _run(cmd: list[str], feed: str | None = None) -> str | None:
     try:
-        out = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=20, input=feed)
     except (OSError, subprocess.SubprocessError):
         return None
     return out.stdout.strip() or None if out.returncode == 0 else None
+
+
+def store_token(value: str) -> str:
+    """Range un token dans le trousseau, et dit ce qui a cloché le cas échéant.
+
+    Le token passe par l'entrée standard de `security`, pas par ses arguments : dans le second
+    cas il serait lisible dans la liste des processus le temps de l'appel. `security` le
+    demande deux fois, d'où les deux lignes.
+    """
+    value = (value or "").strip()
+    if not value:
+        return "token vide"
+    done = _run(
+        ["/usr/bin/security", "add-generic-password", "-U", "-a", getpass.getuser(), "-s", KEYCHAIN_SERVICE, "-w"],
+        feed=f"{value}\n{value}\n",
+    )
+    if done is None:
+        return "le trousseau a refusé l'écriture"
+    return ""
 
 
 def find_gh(cfg: Config) -> str | None:
@@ -106,6 +127,13 @@ class GitHub:
         if self.cfg.token_command:
             self._token = _run(list(self.cfg.token_command))
             self.token_origin = "token_command (réglage)"
+        if not self._token:
+            # Même rangement que LinearTodo : un secret va dans le trousseau, pas dans un
+            # fichier en clair. Le fichier reste lu ensuite, pour les installations d'avant.
+            self._token = _run(
+                ["/usr/bin/security", "find-generic-password", "-a", getpass.getuser(), "-s", KEYCHAIN_SERVICE, "-w"]
+            )
+            self.token_origin = f"trousseau macOS (service « {KEYCHAIN_SERVICE} »)"
         if not self._token and TOKEN_FILE.exists():
             self._token = TOKEN_FILE.read_text().strip() or None
             self.token_origin = str(TOKEN_FILE)
@@ -119,8 +147,8 @@ class GitHub:
             self.token_origin = ""
         if not self._token:
             raise GitHubError(
-                "Aucun token GitHub. Lance `gh auth login`, "
-                f"ou écris un token dans {TOKEN_FILE}."
+                "Aucun token GitHub. Colle-le dans les réglages, lance `gh auth login`, "
+                f"ou écris-le dans {TOKEN_FILE}."
             )
         return self._token
 

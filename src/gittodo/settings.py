@@ -29,6 +29,7 @@ from Cocoa import (
     NSNumberFormatter,
     NSObject,
     NSPopUpButton,
+    NSSecureTextField,
     NSTextField,
     NSView,
     NSViewMinXMargin,
@@ -110,6 +111,17 @@ FORM: tuple[tuple[str, tuple[tuple[str, str, str, str], ...]], ...] = (
             ),
         ),
     ),
+)
+
+# Le token ne vit pas dans `Config` : il n'a rien à faire dans un fichier de réglages en clair.
+# Le champ existe quand même ici, parce que c'est là qu'on le cherche, et ce qu'on y colle part
+# dans le trousseau.
+SECRET = "api_token"
+SECRET_TITLE = "Token GitHub"
+SECRET_LABEL = "Coller un token"
+SECRET_HINT = (
+    "il part dans le trousseau macOS, jamais dans le fichier de réglages · "
+    "⌘V fonctionne ici · laisser vide ne touche pas au token en place"
 )
 
 CHOICES = {"badge_style": ("avatar", "count", "icon_count", "icon")}
@@ -227,17 +239,30 @@ def _from_text(name: str, text: str, current):
 class SettingsForm(NSObject):
     """Contrôles des réglages, plus l'état « modifié » qui commande le bouton."""
 
-    def initWithConfig_onDirty_(self, cfg, on_dirty):
+    def initWithConfig_origin_onDirty_(self, cfg, origin, on_dirty):
         self = objc.super(SettingsForm, self).init()
         if self is None:
             return None
         self.cfg = cfg
+        self.origin = origin
         self.on_dirty = on_dirty
         self.widgets = {}
         self.resets = {}
         self.integers = set()
+        self.secret = None
         self.view = None
         return self
+
+    @objc.python_method
+    def typed_key(self) -> str:
+        """Le token qu'on vient de coller, s'il y en a un."""
+        return str(self.secret.stringValue()).strip() if self.secret is not None else ""
+
+    @objc.python_method
+    def forget_key(self) -> None:
+        """Vide le champ : le token ne traîne pas à l'écran une fois rangé."""
+        if self.secret is not None:
+            self.secret.setStringValue_("")
 
     @objc.python_method
     def build(self, width: float):
@@ -286,6 +311,21 @@ class SettingsForm(NSObject):
                     y += height
                 y += ROW_GAP
             y += TITLE_GAP - ROW_GAP
+        view.addSubview_(_title(SECRET_TITLE, NSMakeRect(MARGIN, y, inner, 16.0)))
+        y += 16.0 + 6.0
+        view.addSubview_(_caption(SECRET_LABEL, "", NSMakeRect(MARGIN, y, inner, 15.0)))
+        y += 16.0
+        self.secret = NSSecureTextField.alloc().initWithFrame_(NSMakeRect(MARGIN, y, inner, FIELD_HEIGHT + 2))
+        self.secret.setPlaceholderString_(self.origin or "aucun token trouvé")
+        self.secret.setFont_(NSFont.monospacedSystemFontOfSize_weight_(11.0, NSFontWeightRegular))
+        self.secret.setDelegate_(self)
+        self.secret.setIdentifier_(SECRET)
+        self.secret.setAutoresizingMask_(NSViewWidthSizable)
+        view.addSubview_(self.secret)
+        y += FIELD_HEIGHT + 4.0
+        height = _hint_height(SECRET_HINT, inner)
+        view.addSubview_(_hint(SECRET_HINT, NSMakeRect(MARGIN, y, inner, height)))
+        y += height + ROW_GAP
         view.setFrame_(NSMakeRect(0, 0, width, y + MARGIN))
         self.view = view
         self.refresh_resets()
@@ -435,8 +475,15 @@ class SettingsForm(NSObject):
 
     @objc.python_method
     def changed(self) -> bool:
+        """Y a-t-il quelque chose à enregistrer ? Un token collé en fait partie.
+
+        Sans lui, coller un token ne faisait apparaître aucun bouton : rien ne disait qu'il
+        restait un geste à faire, ni comment le faire.
+        """
         current = self.collect()
-        return any(not _same(getattr(current, name), getattr(self.cfg, name)) for name in self.authored())
+        return bool(self.typed_key()) or any(
+            not _same(getattr(current, name), getattr(self.cfg, name)) for name in self.authored()
+        )
 
     @objc.python_method
     def commit(self) -> Config:
@@ -521,14 +568,23 @@ def _hint_height(text: str, width: float) -> float:
     return max(14.0, span.height + 2.0)
 
 
+SAVE_WIDTH = 116.0
+
+
 def save_button(target, action: str):
-    """Bouton d'enregistrement : une icône seule, montrée seulement quand il y a à enregistrer."""
-    button = NSButton.alloc().initWithFrame_(NSMakeRect(0, 0, 30, 24))
+    """Bouton d'enregistrement, montré seulement quand il y a quelque chose à enregistrer.
+
+    Avec son libellé : une icône seule laissait chercher où valider, et rien ne disait qu'il
+    n'apparaît qu'en cas de modification.
+    """
+    button = NSButton.alloc().initWithFrame_(NSMakeRect(0, 0, SAVE_WIDTH, 24))
     icon = NSImage.imageWithSystemSymbolName_accessibilityDescription_("square.and.arrow.down", None)
     if icon is not None:
         icon.setTemplate_(True)
-        icon.setSize_(NSMakeSize(15.0, 15.0))
+        icon.setSize_(NSMakeSize(13.0, 13.0))
         button.setImage_(icon)
+    button.setTitle_("Enregistrer")
+    button.setFont_(NSFont.systemFontOfSize_weight_(11.5, NSFontWeightSemibold))
     button.setBezelStyle_(NSBezelStyleAccessoryBarAction)
     button.setTarget_(target)
     button.setAction_(action)

@@ -17,6 +17,7 @@ from Cocoa import (
     NSAttributedString,
     NSBackingStoreBuffered,
     NSColor,
+    NSEventModifierFlagCommand,
     NSFont,
     NSFontAttributeName,
     NSFontWeightRegular,
@@ -48,6 +49,30 @@ from . import IDENTITY_TINT, settings
 from .config import CONFIG_PATH, STATE_PATH, Config
 from .models import GROUPS, ORDER
 
+# Raccourcis d'édition, que macOS ne route pas tout seul dans une app sans menu.
+EDIT_KEYS = {"x": "cut_", "c": "copy_", "v": "paste_", "a": "selectAll_", "z": "undo_"}
+
+
+class EditableWindow(NSWindow):
+    """Fenêtre qui route elle-même les raccourcis d'édition.
+
+    GitTodo est une app d'accessoire (`LSUIElement`) : elle n'a pas de barre de menus, donc pas
+    de menu Édition, et macOS n'envoie ni ⌘V ni ⌘A au champ qui a le focus. Sans ce routage, un
+    token doit être retapé à la main.
+    """
+
+    def performKeyEquivalent_(self, event):
+        # Envoyé directement au champ qui a le focus : passer par l'application supposerait une
+        # fenêtre principale et un menu, que cette app n'a pas.
+        if event.modifierFlags() & NSEventModifierFlagCommand:
+            action = EDIT_KEYS.get((event.charactersIgnoringModifiers() or "").lower())
+            handler = getattr(self.firstResponder(), action, None) if action else None
+            if handler is not None:
+                handler(None)
+                return True
+        return objc.super(EditableWindow, self).performKeyEquivalent_(event)
+
+
 # Deux volets : le formulaire tient dans une colonne étroite, le texte a besoin de largeur.
 FORM_WIDTH = 380.0
 DOC_WIDTH = 620.0
@@ -74,12 +99,20 @@ Ce qu'il te reste à faire sur GitHub, dans la barre des menus. **Lecture seule*
 Aucun token n'est stocké. L'app en cherche un dans cet ordre, et s'arrête au premier trouvé.
 
 - `token_command` : une commande qui imprime un token
+- le trousseau macOS, service `{service}`
 - le fichier `{token_file}`
 - `GITHUB_TOKEN`, sinon `GH_TOKEN`
 - `gh auth token`, donc le compte de ton `gh auth login`
 
 Droits utilisés : `repo` et `read:org`, en lecture. Une PR dans un dépôt hors de portée du \
 token n'existe pas pour l'app.
+
+Pour en poser un sans passer par `gh`, colle-le dans le champ **Token GitHub** du formulaire, à \
+gauche : ⌘V y fonctionne — cette fenêtre route elle-même les raccourcis d'édition, une app sans \
+barre de menus n'en ayant pas d'autre moyen. « Enregistrer » le range dans le trousseau, l'essaie \
+aussitôt auprès de GitHub, et le bandeau du bas dit ce qui s'est passé : le compte auquel il \
+donne accès, ou la raison du refus. La lecture repart alors avec le nouveau token, sans relancer \
+l'app. Le champ se vide après coup, et rien n'est écrit dans le fichier de réglages.
 
 ## Sources
 
@@ -337,7 +370,7 @@ def built_at() -> str:
 
 def document(context: dict) -> str:
     from . import VERSION
-    from .github import TOKEN_FILE
+    from .github import KEYCHAIN_SERVICE, TOKEN_FILE
 
     identity = context.get("identity") or "inconnu"
     viewer = context.get("viewer") or "inconnu"
@@ -351,6 +384,7 @@ def document(context: dict) -> str:
         status=STATE_PATH.with_name("status.json"),
         errors=STATE_PATH.with_name("errors.log"),
         token_file=TOKEN_FILE,
+        service=KEYCHAIN_SERVICE,
         version=VERSION,
         built=built_at(),
         actions=_sections(True),
@@ -437,7 +471,11 @@ class Panel(NSObject):
         self = objc.super(Panel, self).init()
         if self is None:
             return None
-        self.form = settings.SettingsForm.alloc().initWithConfig_onDirty_(Config.load(), self.dirty)
+        self.apply_key = context.get("apply_token")
+        self.status = None
+        self.form = settings.SettingsForm.alloc().initWithConfig_origin_onDirty_(
+            Config.load(), context.get("token") or "", self.dirty
+        )
         self.window = self._window(context)
         return self
 
@@ -446,8 +484,29 @@ class Panel(NSObject):
         self.save.setHidden_(not changed)
 
     def save_(self, sender):
-        self.form.commit()
+        """Enregistre, puis dit ce que ça a donné : c'est la seule preuve visible du geste."""
+        saved = self.form.commit()
+        told = [f"réglages enregistrés dans {CONFIG_PATH.name}"]
+        souci = False
+        key = self.form.typed_key()
+        if key:
+            self.form.forget_key()
+            ok, message = (
+                self.apply_key(key) if self.apply_key else (False, "token non testé : l'app ne tourne pas")
+            )
+            souci = not ok
+            told.append(message)
+        self.tell(" · ".join(told), souci)
         self.save.setHidden_(True)
+        return saved
+
+    @objc.python_method
+    def tell(self, message: str, trouble: bool = False) -> None:
+        """Écrit dans le bandeau ce que la dernière action a produit."""
+        if self.status is None:
+            return
+        self.status.setStringValue_(message)
+        self.status.setTextColor_(NSColor.systemRedColor() if trouble else _identity())
 
     def windowWillClose_(self, notification):
         # Des modifications en attente survivent à la fermeture : rien ne doit disparaître
@@ -459,7 +518,7 @@ class Panel(NSObject):
     @objc.python_method
     def _window(self, context: dict):
         frame = NSMakeRect(0, 0, FORM_WIDTH + DOC_WIDTH, 760)
-        window = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
+        window = EditableWindow.alloc().initWithContentRect_styleMask_backing_defer_(
             frame,
             NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable,
             NSBackingStoreBuffered,
@@ -482,9 +541,20 @@ class Panel(NSObject):
             NSColor.tertiaryLabelColor(),
         )
         where.setFont_(NSFont.monospacedSystemFontOfSize_weight_(9.5, NSFontWeightRegular))
+        where.setFrame_(NSMakeRect(BAR_INSET, 9.0, 300.0, 16.0))
+        # Largeur figée : sans cela le chemin s'étire avec la fenêtre et passe sous le message.
+        where.setAutoresizingMask_(0)
         bar.addSubview_(where)
+        self.status = settings._label(
+            "",
+            NSMakeRect(BAR_INSET + 310.0, 9.0, width - BAR_INSET * 2 - 310.0 - settings.SAVE_WIDTH - 10.0, 16.0),
+            10.5,
+            NSFontWeightSemibold,
+            _identity(),
+        )
+        bar.addSubview_(self.status)
         self.save = settings.save_button(self, "save:")
-        self.save.setFrame_(NSMakeRect(width - BAR_INSET - 30.0, 5.0, 30.0, 24.0))
+        self.save.setFrame_(NSMakeRect(width - BAR_INSET - settings.SAVE_WIDTH, 5.0, settings.SAVE_WIDTH, 24.0))
         self.save.setAutoresizingMask_(NSViewMinXMargin)
         bar.addSubview_(self.save)
         content.addSubview_(bar)

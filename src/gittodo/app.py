@@ -63,7 +63,7 @@ from .avatars import BAR_SIZE, SIZE as AVATAR_SIZE, Avatars
 from .config import CONFIG_PATH, Config
 from .engine import build_items, now, summarize, summarize_closed
 from .formatting import ago, countdown, join, since, spell, truncate
-from .github import GitHub, GitHubError, service_status, signature_of
+from .github import KEYCHAIN_SERVICE, GitHub, GitHubError, service_status, signature_of, store_token
 from .models import GROUPS, ORDER, Item, Kind, Person, Snapshot
 from .state import State, acquire_single_instance, log_error, write_status
 
@@ -1951,6 +1951,32 @@ class GitTodoApp(NSObject):
         else:
             launchagent.enable(program)
 
+    @objc.python_method
+    def apply_token(self, token: str) -> tuple[bool, str]:
+        """Range un token neuf dans le trousseau, l'éprouve, et relance la lecture.
+
+        Enregistrer sans essayer laisserait devant une app muette, sans savoir si le silence
+        vient du token ou de GitHub : c'est l'aller-retour immédiat qui tranche, et il nomme le
+        compte auquel le token donne accès.
+        """
+        trouble = store_token(token)
+        if trouble:
+            return False, f"token non enregistré : {trouble}"
+        self.client.token(refresh=True)
+        try:
+            who = self.client.graphql("query { viewer { login } }", {})
+        except GitHubError as exc:
+            return False, f"token refusé par GitHub : {exc}"
+        login = ((who or {}).get("viewer") or {}).get("login") or ""
+        if not login:
+            return False, "token enregistré, mais GitHub ne dit pas à qui il appartient"
+        # Le token a changé : tout ce qui vient de l'ancien est à relire, sonde comprise.
+        self.signature = ""
+        self.branches_at = self.notifications_at = self.closures_at = None
+        self.clear_incident("pull_requests")
+        self.start_fetch(spinner=True)
+        return True, f"token accepté pour @{login}, dans le trousseau « {KEYCHAIN_SERVICE} »"
+
     def openHelp_(self, sender):
         """Réglages modifiables et mode d'emploi, avec les valeurs réelles de l'installation."""
         self.help_window = manual.panel(
@@ -1959,6 +1985,7 @@ class GitTodoApp(NSObject):
                 "viewer": self.snapshot.viewer,
                 "scope": self.cfg.scope,
                 "token": self.client.token_origin,
+                "apply_token": self.apply_token,
             }
         )
         NSApplication.sharedApplication().activateIgnoringOtherApps_(True)

@@ -95,8 +95,8 @@ pour elle.
 - **⌘** maintenu : la ligne devient « Copier le lien ».
 - **⌘R** : actualise tout de suite.
 - Le token peut se coller dans le champ **Token GitHub** de la fenêtre de réglages : ⌘V y
-  fonctionne, « Enregistrer » le range dans le trousseau et l'essaie aussitôt, et le bandeau du
-  bas dit le compte auquel il donne accès ou la raison du refus.
+  fonctionne, le bouton au bout du champ le range dans le trousseau et l'essaie aussitôt, et le
+  bandeau du bas dit le compte auquel il donne accès ou la raison du refus.
 - Le point ● marque ce qui est arrivé depuis la dernière ouverture du menu.
 - Le visage d'une ligne n'est pas toujours l'auteur de la PR : les métadonnées disent qui c'est et
   ce qu'il a fait, toujours sous la même forme — « créée par », « écrit par », « répondu par »,
@@ -141,10 +141,16 @@ devant l'identité.
 
 Menu **Réglages et mode d'emploi**. La fenêtre contient les deux : à gauche un formulaire pour
 tous les réglages, à droite le mode d'emploi complet, alimenté par les valeurs de ton
-installation. Le bouton d'enregistrement n'apparaît que si tu as modifié quelque chose.
+installation.
 
 Les réglages sont écrits dans `~/.config/gittodo/config.json`, relu à chaud. Le fichier se
 complète seul quand une option apparaît.
+
+**Chaque ligne s'enregistre seule.** Tant qu'elle vaut ce qui est sur le disque, elle ne porte
+rien. Modifiée, un bouton paraît au bout de son champ, et la valeur enregistrée se rappelle en
+dessous — ce qu'on s'apprête à remplacer. Enregistrée, un trait vert passe sous le champ et une
+coche reste à sa place, jusqu'à la modification suivante. Le second bouton, à gauche, revient à la
+valeur d'origine. À l'ouverture, la fenêtre montre le fichier, jamais un brouillon abandonné.
 
 Le mode d'emploi de la fenêtre va plus loin que ce README : les vingt sections du menu une
 par une, les règles de comptage et d'anti-doublon, le coût en quota de chaque requête, et les

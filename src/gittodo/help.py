@@ -17,7 +17,6 @@ from Cocoa import (
     NSAttributedString,
     NSBackingStoreBuffered,
     NSColor,
-    NSEventModifierFlagCommand,
     NSFont,
     NSFontAttributeName,
     NSFontWeightRegular,
@@ -36,10 +35,8 @@ from Cocoa import (
     NSView,
     NSViewHeightSizable,
     NSViewMaxXMargin,
-    NSViewMinXMargin,
     NSViewMinYMargin,
     NSViewWidthSizable,
-    NSWindow,
     NSWindowStyleMaskClosable,
     NSWindowStyleMaskResizable,
     NSWindowStyleMaskTitled,
@@ -48,30 +45,6 @@ from Cocoa import (
 from . import IDENTITY_TINT, settings
 from .config import CONFIG_PATH, STATE_PATH, Config
 from .models import GROUPS, ORDER
-
-# Raccourcis d'édition, que macOS ne route pas tout seul dans une app sans menu.
-EDIT_KEYS = {"x": "cut_", "c": "copy_", "v": "paste_", "a": "selectAll_", "z": "undo_"}
-
-
-class EditableWindow(NSWindow):
-    """Fenêtre qui route elle-même les raccourcis d'édition.
-
-    GitTodo est une app d'accessoire (`LSUIElement`) : elle n'a pas de barre de menus, donc pas
-    de menu Édition, et macOS n'envoie ni ⌘V ni ⌘A au champ qui a le focus. Sans ce routage, un
-    token doit être retapé à la main.
-    """
-
-    def performKeyEquivalent_(self, event):
-        # Envoyé directement au champ qui a le focus : passer par l'application supposerait une
-        # fenêtre principale et un menu, que cette app n'a pas.
-        if event.modifierFlags() & NSEventModifierFlagCommand:
-            action = EDIT_KEYS.get((event.charactersIgnoringModifiers() or "").lower())
-            handler = getattr(self.firstResponder(), action, None) if action else None
-            if handler is not None:
-                handler(None)
-                return True
-        return objc.super(EditableWindow, self).performKeyEquivalent_(event)
-
 
 # Deux volets : le formulaire tient dans une colonne étroite, le texte a besoin de largeur.
 FORM_WIDTH = 380.0
@@ -109,10 +82,11 @@ token n'existe pas pour l'app.
 
 Pour en poser un sans passer par `gh`, colle-le dans le champ **Token GitHub** du formulaire, à \
 gauche : ⌘V y fonctionne — cette fenêtre route elle-même les raccourcis d'édition, une app sans \
-barre de menus n'en ayant pas d'autre moyen. « Enregistrer » le range dans le trousseau, l'essaie \
-aussitôt auprès de GitHub, et le bandeau du bas dit ce qui s'est passé : le compte auquel il \
-donne accès, ou la raison du refus. La lecture repart alors avec le nouveau token, sans relancer \
-l'app. Le champ se vide après coup, et rien n'est écrit dans le fichier de réglages.
+barre de menus n'en ayant pas d'autre moyen. Le bouton au bout du champ le range dans le \
+trousseau, l'essaie aussitôt auprès de GitHub, et le bandeau du bas dit ce qui s'est passé : le \
+compte auquel il donne accès, ou la raison du refus. La coche ne reste que si le token a été \
+accepté. La lecture repart alors avec lui, sans relancer l'app ; le champ se vide après coup, et \
+rien n'est écrit dans le fichier de réglages.
 
 ## Sources
 
@@ -285,6 +259,18 @@ changent. Les mentions deviennent indisponibles. Tu ne vois que ce que ton token
 
 À gauche. Chaque champ est écrit dans `{config}`, relu à chaud : l'enregistrement suffit, sans \
 redémarrage. Le fichier se complète seul quand une option apparaît.
+
+**Chaque ligne s'enregistre seule.** Tant qu'elle vaut ce qui est sur le disque, elle ne porte \
+rien. Modifiée, un bouton paraît au bout de son champ, et la valeur enregistrée se rappelle en \
+dessous — c'est ce qu'on s'apprête à remplacer. Enregistrée, un trait vert passe sous le champ et \
+une coche reste à sa place, jusqu'à la modification suivante : on voit d'un coup d'œil ce qui est \
+en attente et ce qui vient d'être écrit. Le second bouton, à gauche, revient à la valeur \
+d'origine, et le bandeau du bas répète en clair ce qui a été écrit.
+
+Rien ne se garde d'une fois sur l'autre : à l'ouverture, la fenêtre montre le fichier, jamais un \
+brouillon abandonné. Les raccourcis d'édition — ⌘X, ⌘C, ⌘V, ⌘A, ⌘Z — fonctionnent dans les \
+champs : une app d'accessoire n'a pas de menu Édition, donc cette fenêtre les route elle-même, \
+sans quoi macOS ne les enverrait nulle part.
 
 ## Diagnostic
 
@@ -463,42 +449,36 @@ class Panel(NSObject):
     """Fenêtre unique : le mode d'emploi à droite, les réglages modifiables à gauche.
 
     Les deux traitaient du même sujet dans deux endroits séparés, dont un fichier JSON à
-    éditer à la main. Le bouton d'enregistrement n'apparaît qu'une fois quelque chose modifié :
-    tant qu'il est absent, il n'y a rien à valider.
+    éditer à la main. Chaque ligne s'enregistre pour elle-même, au bout de son champ : rien
+    n'attend un bouton lointain, et ce qui est écrit se voit là où on vient de le taper.
     """
 
     def initWithContext_(self, context):
         self = objc.super(Panel, self).init()
         if self is None:
             return None
-        self.apply_key = context.get("apply_token")
         self.status = None
-        self.form = settings.SettingsForm.alloc().initWithConfig_origin_onDirty_(
-            Config.load(), context.get("token") or "", self.dirty
+        self.form = settings.SettingsForm.alloc().initWithConfig_origin_onMessage_(
+            Config.load(), context.get("token") or "", self.tell
         )
+        self.form.apply_key = context.get("apply_token")
         self.window = self._window(context)
         return self
 
     @objc.python_method
-    def dirty(self, changed: bool) -> None:
-        self.save.setHidden_(not changed)
+    def refresh(self, context: dict) -> None:
+        """Reprend le disque et le contexte à chaque ouverture.
 
-    def save_(self, sender):
-        """Enregistre, puis dit ce que ça a donné : c'est la seule preuve visible du geste."""
-        saved = self.form.commit()
-        told = [f"réglages enregistrés dans {CONFIG_PATH.name}"]
-        souci = False
-        key = self.form.typed_key()
-        if key:
-            self.form.forget_key()
-            ok, message = (
-                self.apply_key(key) if self.apply_key else (False, "token non testé : l'app ne tourne pas")
-            )
-            souci = not ok
-            told.append(message)
-        self.tell(" · ".join(told), souci)
-        self.save.setHidden_(True)
-        return saved
+        Une fenêtre gardée en mémoire montrerait sinon l'état de la dernière fois : les valeurs
+        d'alors, et un brouillon jamais enregistré. On veut l'inverse — ce qui est enregistré,
+        et rien d'autre.
+        """
+        self.form.apply_key = context.get("apply_token") or self.form.apply_key
+        self.form.origin = context.get("token") or self.form.origin
+        if self.form.secret is not None:
+            self.form.secret.setPlaceholderString_(self.form.origin or "aucun token trouvé")
+        self.form.reload()
+        self.tell("")
 
     @objc.python_method
     def tell(self, message: str, trouble: bool = False) -> None:
@@ -509,16 +489,14 @@ class Panel(NSObject):
         self.status.setTextColor_(NSColor.systemRedColor() if trouble else _identity())
 
     def windowWillClose_(self, notification):
-        # Des modifications en attente survivent à la fermeture : rien ne doit disparaître
-        # sans avoir été enregistré ni jeté explicitement. Sinon on repart des valeurs du
-        # fichier, qui ont pu changer entre-temps.
-        if not self.form.changed():
-            _ALIVE.pop("panel", None)
+        # Ce qui n'a pas été enregistré est perdu, et c'est voulu : à la réouverture, la fenêtre
+        # doit montrer ce qui est sur le disque, pas un brouillon d'il y a trois jours.
+        _ALIVE.pop("panel", None)
 
     @objc.python_method
     def _window(self, context: dict):
         frame = NSMakeRect(0, 0, FORM_WIDTH + DOC_WIDTH, 760)
-        window = EditableWindow.alloc().initWithContentRect_styleMask_backing_defer_(
+        window = settings.EditableWindow.alloc().initWithContentRect_styleMask_backing_defer_(
             frame,
             NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable,
             NSBackingStoreBuffered,
@@ -547,18 +525,16 @@ class Panel(NSObject):
         bar.addSubview_(where)
         self.status = settings._label(
             "",
-            NSMakeRect(BAR_INSET + 310.0, 9.0, width - BAR_INSET * 2 - 310.0 - settings.SAVE_WIDTH - 10.0, 16.0),
+            NSMakeRect(BAR_INSET + 310.0, 9.0, width - BAR_INSET * 2 - 310.0, 16.0),
             10.5,
             NSFontWeightSemibold,
             _identity(),
         )
         bar.addSubview_(self.status)
-        self.save = settings.save_button(self, "save:")
-        self.save.setFrame_(NSMakeRect(width - BAR_INSET - settings.SAVE_WIDTH, 5.0, settings.SAVE_WIDTH, 24.0))
-        self.save.setAutoresizingMask_(NSViewMinXMargin)
-        bar.addSubview_(self.save)
         content.addSubview_(bar)
-        content.addSubview_(_rule(NSMakeRect(0, height - BAR_HEIGHT, width, 1.0), NSViewWidthSizable | NSViewMinYMargin))
+        content.addSubview_(
+            _rule(NSMakeRect(0, height - BAR_HEIGHT, width, 1.0), NSViewWidthSizable | NSViewMinYMargin)
+        )
 
         body_height = height - BAR_HEIGHT
         left = _scroller(NSMakeRect(0, 0, FORM_WIDTH, body_height))
@@ -610,9 +586,11 @@ _ALIVE: dict = {}
 
 
 def panel(context: dict):
-    """Fenêtre du mode d'emploi et des réglages, créée à la demande."""
+    """Fenêtre du mode d'emploi et des réglages, créée à la demande, relue à chaque ouverture."""
     live = _ALIVE.get("panel")
     if live is None:
         live = Panel.alloc().initWithContext_(context)
         _ALIVE["panel"] = live
+    else:
+        live.refresh(context)
     return live

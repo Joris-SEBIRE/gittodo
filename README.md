@@ -53,6 +53,11 @@ autre interpréteur, passe le chemin : `make install PYTHON=/usr/local/bin/pytho
 make install
 ```
 
+Chaque poste refait cette commande : le bundle n'est pas transportable. Il embarque une copie
+de l'interpréteur Python de la machine qui l'a construit, liée en dur au chemin exact de son
+installation Homebrew, et il n'est pas signé — copié par AirDrop ou par une archive, il est mis
+en quarantaine ou se ferme aussitôt, sans rien afficher. Ce qui se donne, c'est le dépôt.
+
 La cible construit `build/GitTodo.app`, le recopie dans `/Applications` et le lance. Le bundle
 embarque ses dépendances Python et ne dépend plus du dépôt une fois installé, mais son
 interpréteur reste lié au framework Homebrew qui l'a construit, par un chemin qui contient le
@@ -75,6 +80,12 @@ Autres cibles du `Makefile` :
 Le périmètre des recherches est vide par défaut, donc GitTodo interroge **tous** les dépôts que
 ton token voit. Sur un compte qui en voit beaucoup, restreins-le : menu **Réglages et mode
 d'emploi**, champ *Qualificateurs de recherche*, par exemple `org:mon-organisation`.
+
+Deux réglages décident de ce que tu vois, et valent la peine d'un coup d'œil au premier
+lancement. *Reviews nominatives seules*, actif par défaut : une review demandée à une équipe dont
+tu fais partie n'entre pas dans « À reviewer », seules les demandes qui te nomment y vont.
+*Qualificateurs de recherche* : sans `org:`, l'app n'a pas d'annuaire, donc « Voir en tant que »
+n'a personne à proposer au-delà des gens croisés dans tes PR.
 
 Le token est cherché dans cet ordre, au premier trouvé :
 

@@ -76,6 +76,18 @@ class GitHubError(Exception):
         return "erreur"
 
 
+class MissingToken(GitHubError):
+    """Aucun token : ce n'est pas une panne de GitHub, c'est un réglage qui manque.
+
+    Sans cette distinction, l'absence de token sort en « réseau injoignable » et le menu
+    titre « GITHUB EN PANNE » — il envoie chercher dehors ce qui se règle dedans.
+    """
+
+    @property
+    def kind(self) -> str:
+        return "réglage"
+
+
 def _run(cmd: list[str], feed: str | None = None) -> str | None:
     try:
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=20, input=feed)
@@ -118,6 +130,13 @@ class GitHub:
         self.cfg = cfg
         self._token: str | None = None
         self.token_origin = ""
+        # Photo du compte du token, lue avec les PR : la barre en a besoin, et elle ne doit
+        # dépendre ni d'un annuaire d'organisation ni d'une PR déjà croisée.
+        self.viewer_face = ""
+        # Membres annoncés par l'organisation contre membres réellement lus : GitHub n'en sert
+        # pas plus de cent par page, et une liste tronquée en silence ferait croire que le
+        # collègue qu'on cherche n'existe pas.
+        self.people_total = 0
         self.defaults: dict[str, str] = {}
 
     def token(self, refresh: bool = False) -> str:
@@ -146,9 +165,8 @@ class GitHub:
         if not self._token:
             self.token_origin = ""
         if not self._token:
-            raise GitHubError(
-                "Aucun token GitHub. Colle-le dans les réglages, lance `gh auth login`, "
-                f"ou écris-le dans {TOKEN_FILE}."
+            raise MissingToken(
+                "Colle un token dans les réglages, ou lance `gh auth login`"
             )
         return self._token
 
@@ -230,18 +248,22 @@ class GitHub:
                 pr.sources.add(source)
                 prs[pr.id] = pr
         rate = (data.get("rateLimit") or {}).get("remaining")
+        self.viewer_face = (data.get("viewer") or {}).get("avatarUrl") or ""
         return list(prs.values()), data["viewer"]["login"], rate, truncated
 
     def fetch_people(self) -> list[Person]:
         """Membres des organisations de `scope`, les plus récemment actifs d'abord."""
         people: dict[str, Person] = {}
         activity: dict[str, datetime] = {}
+        self.people_total = 0
         for org in self.cfg.orgs():
             try:
                 data = self.graphql(PEOPLE_QUERY, {"org": org, "recent": f"{RECENT_ACTIVITY} org:{org}"})
             except GitHubError:
                 continue
-            members = ((data.get("organization") or {}).get("membersWithRole") or {}).get("nodes") or []
+            listing = ((data.get("organization") or {}).get("membersWithRole") or {})
+            self.people_total += listing.get("totalCount") or 0
+            members = listing.get("nodes") or []
             for node in members:
                 people[node["login"]] = Person(
                     login=node["login"], name=node.get("name") or "", avatar=node.get("avatarUrl") or ""

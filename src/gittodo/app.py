@@ -146,6 +146,8 @@ LEVELS = {
     "attention": ("DONNÉES INCOMPLÈTES", "systemYellowColor"),
     "alerte": ("GITHUB RÉPOND MAL", "systemOrangeColor"),
     "critique": ("GITHUB EN PANNE", "systemRedColor"),
+    # Rien ne cloche chez GitHub : il manque un token, et c'est à l'utilisateur de le poser.
+    "réglage": ("TOKEN MANQUANT", "systemYellowColor"),
 }
 # Gravité officielle de githubstatus.com traduite dans nos niveaux.
 OFFICIAL = {"critical": "critique", "major": "critique", "minor": "alerte"}
@@ -157,6 +159,7 @@ CODES = {
     "panne": "erreur serveur",
     "refus": "refusé",
     "réseau": "réseau injoignable",
+    "réglage": "aucun token",
     "erreur": "erreur",
 }
 # Séparateur des métadonnées, et ce qui, dedans, est un délai. C'est le segment que l'œil
@@ -942,6 +945,10 @@ class GitTodoApp(NSObject):
         health = self.health if health is None else health
         if not health:
             return ""
+        # Un réglage qui manque n'est une panne de personne : le dire en rouge enverrait
+        # chercher chez GitHub ce qui se règle dans la fenêtre des réglages.
+        if all(trouble["kind"] == "réglage" for trouble in health.values()):
+            return "réglage"
         official = OFFICIAL.get(self.service[0], "")
         if official == "critique":
             return "critique"
@@ -1214,9 +1221,12 @@ class GitTodoApp(NSObject):
         self.land(self.apply_snapshot, snapshot)
         # Les photos arrivent après le badge : le menu est reconstruit à chaque ouverture.
         if not snapshot.error:
+            # La photo du compte du token en fait partie, même quand aucune ligne ne la porte :
+            # `Avatars.image` ne sert que ce qui est déjà en cache, donc sans ce préchargement un
+            # menu vide — un collègue qui n'a rien à faire — reste sans visage dans la barre.
             faces = {
                 face for item in snapshot.items for face in (item.avatar, *item.faces)
-            } | {person.avatar for person in snapshot.people}
+            } | {person.avatar for person in snapshot.people} | {self.client.viewer_face}
             self.avatars.prefetch({face for face in faces if face})
 
     @objc.python_method
@@ -1307,8 +1317,21 @@ class GitTodoApp(NSObject):
             self.note_incident("people", exc)
             found = []
         if not found:
-            seen = {pr.author: pr.avatar for pr in prs if pr.author != viewer}
-            found = [Person(login, "", avatar) for login, avatar in sorted(seen.items())]
+            # Tout le monde croisé dans les PR lues, pas seulement leurs auteurs : les reviewers
+            # sollicités et ceux qui ont écrit en font partie, et sans organisation dans le
+            # périmètre c'est la seule matière disponible.
+            seen: dict[str, str] = {}
+            for pr in prs:
+                seen.update(pr.portraits)
+            # On ne peut pas observer une équipe — ses recherches ne rendraient rien — ni un
+            # bot. Les équipes se reconnaissent au `@` que portent les reviewers sollicités.
+            teams = {r.lstrip("@").lower() for pr in prs for r in pr.reviewers if r.startswith("@")}
+            skip = teams | self.cfg.ignored() | {viewer.lower()}
+            found = [
+                Person(login, "", avatar)
+                for login, avatar in sorted(seen.items())
+                if login.lower() not in skip
+            ]
         return tuple(found)
 
     @objc.python_method
@@ -1350,7 +1373,11 @@ class GitTodoApp(NSObject):
         for person in self.snapshot.people:
             if person.login == login:
                 return person
-        return Person(login)
+        # L'annuaire est vide sans organisation dans le périmètre, et le périmètre est vide par
+        # défaut : la photo du compte du token vient donc de la requête des PR, pas de l'annuaire.
+        # Sans ce repli, un utilisateur qui n'a rien réglé n'a pas de photo dans sa barre.
+        face = self.client.viewer_face if login == self.snapshot.viewer else ""
+        return Person(login, "", face)
 
     @objc.python_method
     def set_identity(self, login: str | None) -> None:
@@ -1651,9 +1678,16 @@ class GitTodoApp(NSObject):
             label, effet = SOURCES.get(source, (source, ""))
             kind = trouble["kind"]
             code = f"HTTP {trouble['status']}" if trouble.get("status") else CODES.get(kind, kind)
+            # Un token qui manque se répare ici, pas sur la page d'état de GitHub : la ligne
+            # porte alors le remède en clair et ouvre les réglages.
+            manque = kind == "réglage"
             row = self.row_item(
-                _rich(f"{label} : {code}", join(effet, since(trouble["since"])), tint=LEVELS[level][1]),
-                "openStatus:",
+                _rich(
+                    f"{label} : {code}",
+                    join(trouble["message"] if manque else effet, since(trouble["since"])),
+                    tint=LEVELS[level][1],
+                ),
+                "openHelp:" if manque else "openStatus:",
                 source,
                 badge,
             )
@@ -1865,8 +1899,23 @@ class GitTodoApp(NSObject):
         mine.setState_(0 if self.snapshot.impersonating else 1)
         mine.setImage_(_face(self.avatars, self.person_for(self.snapshot.viewer).avatar, "person.crop.circle"))
         others = [p for p in self.snapshot.people if p.login != self.snapshot.viewer]
-        if others:
-            submenu.addItem_(NSMenuItem.separatorItem())
+        submenu.addItem_(NSMenuItem.separatorItem())
+        manquants = self.client.people_total - len(self.snapshot.people)
+        if manquants > 0:
+            # Même règle que partout ailleurs dans l'app : un compte écrêté le dit.
+            self.add_info(
+                submenu,
+                f"{manquants} membre(s) de plus dans l'organisation, non lus",
+                "ellipsis",
+            )
+        if not others:
+            # Un sous-menu qui ne propose personne passe pour cassé : il dit plutôt d'où vient
+            # l'annuaire, puisque c'est un réglage qui manque et pas une panne.
+            self.add_info(
+                submenu,
+                "personne d'autre à proposer — ajoute « org:ton-organisation » au périmètre",
+                "person.crop.circle.badge.questionmark",
+            )
         # Les gens classés par action la plus récente sur les dépôts ; les inactifs après
         # un séparateur, pour qu'ils ne noient pas ceux avec qui tu travailles en ce moment.
         quiet = True

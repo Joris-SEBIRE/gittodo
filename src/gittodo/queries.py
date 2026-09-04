@@ -39,7 +39,7 @@ PR_QUERY = """
 query($mine:String!,$toReview:String!,$commented:String!,$reviewed:String!,$assigned:String!,
       $mentioned:String!,$n:Int!) {
   rateLimit { cost remaining resetAt }
-  viewer { login }
+  viewer { login avatarUrl(size: 64) }
   mine: search(query:$mine, type:ISSUE, first:$n) { issueCount nodes { ...PR } }
   toReview: search(query:$toReview, type:ISSUE, first:$n) { issueCount nodes { ...PR } }
   commented: search(query:$commented, type:ISSUE, first:$n) { issueCount nodes { ...PR } }

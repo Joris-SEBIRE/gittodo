@@ -319,7 +319,7 @@ def _sections(action: bool) -> str:
 
 
 DESCRIPTIONS = {
-    "review_requested": "`user-review-requested:` sur la PR d'un autre, et tu n'as rien posé dessus",
+    "review_requested": "`user-review-requested:` sur la PR d'un autre, et tu n'as rien posé dessus. Nominatif seulement : une review demandée à une équipe dont tu fais partie n'y entre pas, sauf si tu décoches « Reviews nominatives seules »",
     "review_again": "tu as demandé des changements, l'auteur a poussé depuis",
     "replies_to_check": "on a répondu dans un fil que tu as ouvert : à lire, puis à résoudre",
     "messages_to_answer": "des messages attendent ta réponse ; la pastille les compte",

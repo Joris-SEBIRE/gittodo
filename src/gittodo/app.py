@@ -20,6 +20,8 @@ from Cocoa import (
     NSBundle,
     NSColor,
     NSCompositingOperationSourceOver,
+    NSCursor,
+    NSEvent,
     NSEventModifierFlagCommand,
     NSEventModifierFlagOption,
     NSFont,
@@ -57,7 +59,7 @@ from Cocoa import (
 )
 from PyObjCTools import AppHelper
 
-from . import IDENTITY_TINT, branches, launchagent
+from . import IDENTITY_TINT, branches, launchagent, shortcuts
 from . import help as manual
 from .avatars import BAR_SIZE, SIZE as AVATAR_SIZE, Avatars
 from .config import CONFIG_PATH, Config
@@ -104,6 +106,8 @@ CHROME_LIFT = 1.75
 # pour les deux, sinon les deux colonnes se désaligneraient au premier réglage de l'une.
 LEFT_MARGIN = 6.0
 GLYPH_CHIP = 10.0
+# Largeur minimale d'une part de la barre d'accès rapide : en deçà, le libellé ne dit plus rien.
+SHORTCUT_MIN = 84.0
 # Glyphe de la ligne du trajet : un cran sous celui des pastilles, comme sa police.
 GLYPH_ROUTE = 9.0
 # Étiquette de texte (« conflit ») et pastille de comptage : même primitive, deux géométries.
@@ -802,6 +806,9 @@ class GitTodoApp(NSObject):
         self.show_spinner = False
         self.menu_open = False
         self.footer_item = None
+        self.footer_rows, self.footer_active = [], []
+        self.shortcut_row = None
+        self.hover_timer = None
         self.shown = None
         self.help_window = None
         self.signature = ""
@@ -1588,9 +1595,36 @@ class GitTodoApp(NSObject):
 
     def menuWillOpen_(self, menu):
         self.menu_open = True
+        # Sondage plutôt que zone de suivi : dans un menu déroulé, `mouseEntered:` n'arrive
+        # qu'une fois sur deux — c'est la leçon de la ligne à zones de SpacefillLocalhost.
+        if self.hover_timer is None:
+            self.hover_timer = NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(
+                shortcuts.POLL_SECONDS, self, "hover:", None, True
+            )
+            NSRunLoop.currentRunLoop().addTimer_forMode_(self.hover_timer, NSRunLoopCommonModes)
+
+    def hover_(self, timer):
+        """Suit la souris sur la barre rapide : pastille, curseur et infobulle."""
+        row = self.shortcut_row
+        if row is None:
+            return
+        zone = row.hovered()
+        row.set_hover(zone)
+        if zone is None:
+            return
+        row.setToolTip_(row.tip_of(zone))
+        # La boucle de suivi du menu repose la flèche dès qu'elle reprend la main : la main ne
+        # tient que réaffirmée à chaque tour.
+        (NSCursor.pointingHandCursor() if row.enabled_at(zone) else NSCursor.arrowCursor()).set()
 
     def menuDidClose_(self, menu):
         self.menu_open = False
+        if self.hover_timer is not None:
+            self.hover_timer.invalidate()
+            self.hover_timer = None
+        if self.shortcut_row is not None:
+            self.shortcut_row.set_hover(None)
+        NSCursor.arrowCursor().set()
         self.footer_item = None
         self.shown = None
         self.state.mark_seen(self.visible())
@@ -1643,6 +1677,67 @@ class GitTodoApp(NSObject):
         if menu.numberOfItems():
             menu.addItem_(NSMenuItem.separatorItem())
         self.add_footer(menu, summarize(items)[0])
+        self.add_shortcuts(menu)
+
+    @objc.python_method
+    def add_shortcuts(self, menu) -> None:
+        """Barre d'accès rapide, épinglée en tête : les lignes du pied, en icônes et en abrégé.
+
+        Mêmes icônes, même ordre, même vocabulaire : ce sont les lignes du bas, réduites à ce
+        qui tient sur une ligne. Elles se partagent la largeur du menu en parts égales, et le
+        libellé de chacune est coupé net à la part suivante.
+
+        Posée en dernier, mais insérée en premier : c'est le seul moment où le menu connaît sa
+        largeur, celle de sa ligne la plus large.
+        """
+        entries = []
+        for item, symbol in self.footer_rows:
+            action = item.action()
+            entries.append(
+                (
+                    symbol,
+                    (str(item.attributedTitle().string()) if item.attributedTitle() else str(item.title())),
+                    ("popViewAs:" if item.hasSubmenu() else str(action) if action else None)
+                    if item.isEnabled()
+                    else None,
+                    getattr(NSColor, IDENTITY_TINT)() if item in self.footer_active else None,
+                    item in self.footer_active,
+                    str(item.toolTip() or "") or (str(item.title()) or "action"),
+                )
+            )
+        if not entries:
+            return
+        width = max(menu.size().width, SHORTCUT_MIN * len(entries))
+        row = shortcuts.Shortcuts.alloc().initWithFrame_(NSMakeRect(0, 0, width, shortcuts.ROW_HEIGHT))
+        row.load(entries)
+        row.on_pick = self.run_shortcut
+        holder = NSMenuItem.alloc().init()
+        holder.setView_(row)
+        menu.insertItem_atIndex_(holder, 0)
+        menu.insertItem_atIndex_(NSMenuItem.separatorItem(), 1)
+        self.shortcut_row = row
+
+    def popViewAs_(self, sender):
+        """Rouvre la liste des identités là où le pointeur se trouve."""
+        self.view_as_menu().popUpMenuPositioningItem_atLocation_inView_(None, NSEvent.mouseLocation(), None)
+
+    @objc.python_method
+    def run_shortcut(self, action: str) -> None:
+        """Referme le menu, puis fait ce que la ligne du bas aurait fait.
+
+        L'action est différée d'un tour de boucle. Agir dans la foulée du clic reviendrait à
+        ouvrir une fenêtre depuis la boucle modale du menu, qui n'a pas fini de se dérouler :
+        l'app se figeait, menu ouvert et clic sans effet. Le report la laisse se terminer.
+        """
+        menu = self.status_item.menu() if self.status_item is not None else None
+        if menu is not None:
+            menu.cancelTracking()
+        self.performSelector_withObject_afterDelay_("runDeferred:", action, 0.0)
+
+    def runDeferred_(self, action):
+        handler = getattr(self, str(action).replace(":", "_"), None)
+        if handler is not None:
+            handler(self)
 
     @objc.python_method
     def add_health(self, menu) -> None:
@@ -1871,29 +1966,47 @@ class GitTodoApp(NSObject):
             self.add_info(menu, f"limite atteinte : {note}", "exclamationmark.triangle")
         if self.snapshot.impersonating:
             self.add_info(menu, "mentions indisponibles à la place d'un collègue", "exclamationmark.triangle")
+        # Les lignes du pied sont retenues dans l'ordre : la barre d'accès rapide les reprend
+        # telles quelles, mêmes icônes, mêmes mots, même suite.
+        self.footer_rows, self.footer_active = [], []
         self.footer_item = self.add_action(menu, "", "refresh:", "r", "arrow.clockwise")
         self.footer_item.setAttributedTitle_(self.refresh_title(action_count))
+        self.footer_item.setToolTip_("Actualiser maintenant (⌘R)")
+        self.footer_rows.append((self.footer_item, "arrow.clockwise"))
         hidden = len(self.state.dismissed_here())
         if hidden:
-            self.add_action(
+            row = self.add_action(
                 menu, f"Réafficher {hidden} élément(s) masqué(s)", "restore:", symbol="arrow.uturn.backward"
             )
+            row.setToolTip_(f"Réafficher les {hidden} élément(s) masqué(s)")
+            self.footer_rows.append((row, "arrow.uturn.backward"))
         menu.addItem_(NSMenuItem.separatorItem())
-        self.add_view_as(menu)
+        self.footer_rows.append((self.add_view_as(menu), "eye"))
         if self.bundle_program():
             # Coche en fin de libellé : la colonne de gauche porte déjà l'icône de la ligne.
             started = launchagent.is_enabled()
-            self.add_action(
+            row = self.add_action(
                 menu, "Lancer au démarrage" + ("  ✓" if started else ""), "toggleLogin:", symbol="power"
             )
-        self.add_action(menu, "Réglages et mode d'emploi", "openHelp:", symbol="gearshape")
-        self.add_action(menu, "Quitter GitTodo", "quitApp:", "q", "xmark.circle")
+            row.setToolTip_(
+                "Lancer au démarrage : activé, cliquer pour désactiver" if started
+                else "Lancer au démarrage : désactivé, cliquer pour activer"
+            )
+            self.footer_rows.append((row, "power"))
+            if started:
+                self.footer_active.append(row)
+        # Virgule pour les réglages, comme partout sur macOS. Les raccourcis clavier restent
+        # les seules commandes atteignables quand le menu est déroulé au-delà de l'écran.
+        row = self.add_action(menu, "Réglages et mode d'emploi", "openHelp:", ",", symbol="gearshape")
+        row.setToolTip_("Réglages et mode d'emploi (⌘,)")
+        self.footer_rows.append((row, "gearshape"))
+        row = self.add_action(menu, "Quitter GitTodo", "quitApp:", "q", "xmark.circle")
+        row.setToolTip_("Quitter GitTodo (⌘Q)")
+        self.footer_rows.append((row, "xmark.circle"))
 
     @objc.python_method
-    def add_view_as(self, menu) -> None:
-        """Sous-menu de bascule d'identité : lecture seule, avec le token courant."""
-        parent = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Voir en tant que", None, "")
-        parent.setImage_(_chrome_symbol("eye"))
+    def view_as_menu(self):
+        """Le sous-menu des identités, monté à part : la barre rapide le rouvre tel quel."""
         submenu = NSMenu.alloc().init()
         mine = self.add_action(submenu, f"Moi (@{self.snapshot.viewer or '…'})", "viewAsSelf:")
         mine.setState_(0 if self.snapshot.impersonating else 1)
@@ -1928,8 +2041,17 @@ class GitTodoApp(NSObject):
             entry.setRepresentedObject_(person.login)
             entry.setState_(1 if person.login == self.snapshot.identity else 0)
             entry.setImage_(_face(self.avatars, person.avatar, "person.crop.circle"))
-        parent.setSubmenu_(submenu)
+        return submenu
+
+    @objc.python_method
+    def add_view_as(self, menu):
+        """Sous-menu de bascule d'identité : lecture seule, avec le token courant."""
+        parent = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Voir en tant que", None, "")
+        parent.setImage_(_chrome_symbol("eye"))
+        parent.setSubmenu_(self.view_as_menu())
+        parent.setToolTip_("Voir les notifications et les PR d'un collègue")
         menu.addItem_(parent)
+        return parent
 
     @objc.python_method
     def bundle_program(self) -> str | None:

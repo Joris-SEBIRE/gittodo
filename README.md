@@ -53,16 +53,14 @@ autre interpréteur, passe le chemin : `make install PYTHON=/usr/local/bin/pytho
 make install
 ```
 
-Chaque poste refait cette commande : le bundle n'est pas transportable. Il embarque une copie
-de l'interpréteur Python de la machine qui l'a construit, liée en dur au chemin exact de son
-installation Homebrew, et il n'est pas signé — copié par AirDrop ou par une archive, il est mis
-en quarantaine ou se ferme aussitôt, sans rien afficher. Ce qui se donne, c'est le dépôt.
-
 La cible construit `build/GitTodo.app`, le recopie dans `/Applications` et le lance. Le bundle
-embarque ses dépendances Python et ne dépend plus du dépôt une fois installé, mais son
-interpréteur reste lié au framework Homebrew qui l'a construit, par un chemin qui contient le
-numéro de version exact. Un `brew upgrade python@3.13` suivi d'un `brew cleanup` casse donc
-l'app installée : refais `make install` après une montée de version de Python.
+embarque ses dépendances Python et ne dépend plus du dépôt une fois installé, mais il embarque
+aussi une copie de l'interpréteur, liée en dur au chemin exact de l'installation Homebrew qui l'a
+construite, numéro de version compris. Deux conséquences : un `brew upgrade python@3.13` suivi
+d'un `brew cleanup` casse l'app installée, il faut refaire `make install` ; et le bundle ne se
+transporte pas d'un Mac à l'autre — non signé de surcroît, il serait mis en quarantaine ou se
+fermerait aussitôt, sans rien afficher. Ce qui se donne, c'est le dépôt, et chaque poste refait
+`make install`.
 
 Pour que l'app démarre avec la session : menu **Lancer au démarrage**, qui écrit
 `~/Library/LaunchAgents/fr.jsebire.gittodo.plist`.
@@ -132,6 +130,10 @@ pour elle.
 - Une pastille violette en bas à gauche de la photo suit les PR sorties du périmètre ouvert :
   messages restés sans réponse dessus, et clôtures faites par quelqu'un d'autre. Elle décompte
   quand tu ouvres la ligne. La pastille rouge, en haut à droite, ne concerne que les PR ouvertes.
+- Une clôture ne compte que tant qu'elle est joignable : au-delà de *Clôtures qui comptent*
+  (sept jours par défaut), ou repoussée hors des lignes affichées par des clôtures plus récentes,
+  elle reste dans l'histoire sans peser. Sans cette borne, un compte qu'aucune ligne visible ne
+  porte plus ne pourrait plus s'éteindre.
 
 Le menu se met à jour pendant qu'il est ouvert, sans qu'il faille le refermer.
 

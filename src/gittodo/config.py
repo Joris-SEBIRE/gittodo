@@ -82,6 +82,10 @@ class Config:
     # l'histoire de mes clôtures. Deux recherches mesurées à 3 points, sur leur propre cadence.
     show_closed: bool = True
     closed_days: int = 30
+    # Au-delà, une clôture reste dans l'histoire sans peser : passé quelques jours ce n'est plus
+    # une nouvelle, et une ligne sortie des lignes affichées n'est plus cliquable, donc son
+    # compte ne pourrait plus s'éteindre.
+    closed_count_days: int = 7
     closed_history_rows: int = 10
     closed_refresh_seconds: int = 300
     show_waiting: bool = True

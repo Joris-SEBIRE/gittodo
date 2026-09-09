@@ -91,6 +91,12 @@ FORM: tuple[tuple[str, tuple[tuple[str, str, str, str], ...]], ...] = (
             ("show_closed", "Suivi des PR clôturées", "messages restés sans réponse, et historique", ""),
             ("closed_days", "Fenêtre des clôturées", "profondeur du suivi des PR sorties du périmètre", ""),
             ("closed_history_rows", "Lignes d'historique", "nombre de clôtures affichées, les plus récentes", ""),
+            (
+                "closed_count_days",
+                "Clôtures qui comptent",
+                "au-delà, la clôture reste affichée sans peser dans la pastille",
+                "",
+            ),
         ),
     ),
     (

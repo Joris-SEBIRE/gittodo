@@ -615,8 +615,23 @@ def closed_items(closures: list[Closure], me: str, cfg: Config) -> list[Item]:
     # tardif, lui, ne l'est pas : la recherche `involves:` porte sur la date de mise à jour, et
     # une question posée trois mois après un merge attend toujours une réponse.
     depuis = now() - timedelta(days=max(1, cfg.closed_days))
+    compte_depuis = now() - timedelta(days=max(1, cfg.closed_count_days))
     actions: list[Item] = []
     histoire: list[Item] = []
+
+    def pese(closure: Closure) -> bool:
+        """Cette clôture entre-t-elle dans la pastille violette, ou n'est-elle que de l'histoire ?
+
+        Trois conditions, et la troisième est mécanique : je sais déjà ce que j'ai clôturé
+        moi-même ; passé quelques jours une clôture n'est plus une nouvelle ; et au-delà des
+        lignes affichées elle n'est plus cliquable, donc un compte posé là ne pourrait plus
+        s'éteindre et resterait allumé à vie.
+        """
+        return (
+            closure.actor != me
+            and closure.at >= compte_depuis
+            and len(histoire) < max(1, cfg.closed_history_rows)
+        )
     for closure in sorted(closures, key=lambda c: c.at, reverse=True):
         pr = closure.pr
         # Le mot vient de la pastille : une seule source, sinon le renommer ici laisserait
@@ -646,7 +661,7 @@ def closed_items(closures: list[Closure], me: str, cfg: Config) -> list[Item]:
                 avatar=closure.actor_avatar or pr.avatar,
                 hint=f"{par} le {closure.at:%d/%m à %H:%M}",
                 closed=True,
-                counted=((GROUPS[Kind.RECENTLY_CLOSED].symbol, 0 if closure.actor == me else 1),),
+                counted=((GROUPS[Kind.RECENTLY_CLOSED].symbol, 1 if pese(closure) else 0),),
             )
         )
     # Aucun écrêtage ici : le plafond est un plafond d'affichage, tenu par le menu, qui sait

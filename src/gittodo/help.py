@@ -340,7 +340,9 @@ compte comme un message à traiter, cette section porte le reste",
     "orphan_branch": "une branche que tu as poussée porte du travail qu'aucune PR ne soumet",
     "branch_to_delete": "PR `MERGED`, PR `CLOSED` sans merge, ou aucun commit en avance sur la cible",
     "recently_closed": "une de tes PR est sortie du périmètre ouvert ; la ligne compte en violet \
-tant que tu ne l'as pas ouverte, et jamais si c'est toi qui as clôturé",
+tant que tu ne l'as pas ouverte, et jamais si c'est toi qui as clôturé. Passé `closed_count_days` \
+jours, ou sortie des lignes affichées par des clôtures plus récentes, elle reste dans l'histoire \
+sans plus peser : un compte qu'on ne peut plus atteindre pour l'éteindre resterait allumé à vie",
 }
 
 

@@ -21,7 +21,8 @@ run: venv            ## Lance depuis les sources (Ctrl-C pour arrêter)
 app:                 ## Construit build/GitTodo.app
 	./scripts/build_app.sh $(APP)
 
-install: app stop    ## Installe dans /Applications et lance
+install: stop        ## Installe dans /Applications et lance
+	./scripts/build_app.sh $(APP) $(INSTALLED)
 	rm -rf $(INSTALLED)
 	ditto $(APP) $(INSTALLED)
 	open $(INSTALLED)
@@ -30,6 +31,7 @@ restart: stop        ## Relance l'app installée
 	open $(INSTALLED)
 
 stop:                ## Arrête toute instance (osascript déclencherait une demande d'autorisation)
+	-@pkill -f 'GitTodo.app/Contents/MacOS' >/dev/null 2>&1 || true
 	-@pkill -f -- '-m gittodo' >/dev/null 2>&1 || true
 
 uninstall: stop     ## Retire l'app, le LaunchAgent, l'état local et le cache des photos

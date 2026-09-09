@@ -62,6 +62,17 @@ transporte pas d'un Mac à l'autre — non signé de surcroît, il serait mis en
 fermerait aussitôt, sans rien afficher. Ce qui se donne, c'est le dépôt, et chaque poste refait
 `make install`.
 
+Forme du bundle, et pourquoi elle compte : l'exécutable principal **est** l'interpréteur Python,
+et l'app démarre par une amorce `sitecustomize.py` posée dans ses paquets. Un exécutable qui
+`exec` un autre binaire — script shell comme lanceur compilé — perd la place de son élément dans
+la barre des menus sur macOS 26 : l'app tourne, sans erreur, et aucune icône n'apparaît. Trois
+autres points sont nécessaires au démarrage, et le script de construction refuse de livrer sans
+eux : l'exécutable re-signé sous l'identifiant du bundle, sans quoi Launch Services refuse le
+lancement en erreur -54 ; `PYTHONPATH` dans l'`Info.plist`, parce que Launch Services démarre
+l'interpréteur avec `argv=['']` et qu'il ne retrouve alors pas seul les paquets du venv ; et le
+chemin d'installation cuit dans ce `PYTHONPATH`, ce qui veut dire que `build/*.app` n'est pas
+lançable tel quel — c'est `make install` qui produit le bundle utilisable.
+
 Pour que l'app démarre avec la session : menu **Lancer au démarrage**, qui écrit
 `~/Library/LaunchAgents/fr.jsebire.gittodo.plist`.
 

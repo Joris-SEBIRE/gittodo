@@ -521,11 +521,20 @@ class GitHub:
             }
         return ""
 
-    def fetch_closed(self, days: int, mine: int = 20, involved: int = 10) -> tuple[list[Closure], int | None]:
+    def fetch_closed(
+        self, days: int, mine: int = 50, involved: int = 50
+    ) -> tuple[list[Closure], int | None, list[str]]:
         """PR sorties du périmètre ouvert, avec l'acteur de leur clôture et ce qui s'est dit depuis.
 
-        Deux recherches suffisent et portent déjà tout : pas d'étape d'hydratation. Mesuré à 3
-        points pour trente jours, ce qui tient sur une cadence lente.
+        Deux recherches suffisent et portent déjà tout : pas d'étape d'hydratation. Mesuré à 33
+        points pour cinquante clôtures et cinquante PR où j'ai un rôle, soit 396 points par heure
+        à la cadence par défaut — la profondeur compte, parce qu'une demande restée ouverte sur
+        une PR déjà mergée ne se voit nulle part ailleurs. La recherche `involves:` étant triée
+        par date de mise à jour, un message neuf ramène de lui-même sa PR dans la fenêtre.
+
+        Ce qui n'a pas été lu est dit, jamais escamoté : les cinquante résultats d'une recherche
+        et les quinze fils d'une PR sont des plafonds qu'on atteint pour de bon, et un compte
+        qu'on annonce exact doit avouer là où il ne l'est plus.
         """
         since = (datetime.now(timezone.utc).date() - timedelta(days=max(1, days))).isoformat()
         variables = {
@@ -535,14 +544,26 @@ class GitHub:
         variables["involved_n"] = max(1, min(involved, 50))
         data = self.graphql(CLOSED_QUERY, variables)
         vus: dict[str, Closure] = {}
+        truncated: list[str] = []
+        deep: list[str] = []
         for source in CLOSED_SEARCHES:
-            for node in (data.get(source) or {}).get("nodes") or []:
-                if not node or node.get("state") not in ("MERGED", "CLOSED"):
+            block = data.get(source) or {}
+            nodes = [n for n in (block.get("nodes") or []) if n]
+            if (block.get("issueCount") or 0) > len(nodes):
+                truncated.append(f"clôturées {source} ({block['issueCount']} résultats, {len(nodes)} lus)")
+            for node in nodes:
+                if node.get("state") not in ("MERGED", "CLOSED"):
                     continue
+                threads = node.get("reviewThreads") or {}
+                lus = len(threads.get("nodes") or [])
+                if (threads.get("totalCount") or 0) > lus:
+                    deep.append(f"{node['repository']['nameWithOwner']}#{node['number']}")
                 closure = _parse_closure(node, source)
                 if closure is not None:
                     vus.setdefault(closure.pr.id, closure)
-        return list(vus.values()), (data.get("rateLimit") or {}).get("remaining")
+        if deep:
+            truncated.append(f"fils non lus sur {', '.join(sorted(set(deep))[:3])}")
+        return list(vus.values()), (data.get("rateLimit") or {}).get("remaining"), truncated
 
     def fetch_code_owners(self, prs: list[PullRequest]) -> dict[str, tuple[str, ...]]:
         """Propriétaires dont la review sera obligatoire, pour les PR où GitHub ne l'a pas dit.
@@ -656,6 +677,20 @@ def _actor(node: dict | None) -> tuple[str, bool, str]:
     return node.get("login") or "ghost", node.get("__typename") == "Bot", node.get("avatarUrl") or ""
 
 
+def _spoken(node: dict) -> bool:
+    """Un commentaire de review encore en brouillon n'a été dit à personne.
+
+    GitHub le garde visible de son seul auteur jusqu'à ce que la revue soit soumise. Le prendre
+    pour de la parole ferait taire un fil où quelqu'un attend toujours ma réponse, alors que
+    personne n'a rien reçu.
+    """
+    return node.get("state") != "PENDING"
+
+
+def _thread_comments(thread: dict) -> tuple[Comment, ...]:
+    return tuple(_comment(c) for c in ((thread.get("comments") or {}).get("nodes") or []) if _spoken(c))
+
+
 def _comment(node: dict) -> Comment:
     login, is_bot, avatar = _actor(node.get("author"))
     return Comment(
@@ -692,7 +727,7 @@ def _parse_closure(node: dict, source: str) -> Closure | None:
             outdated=False,
             path="",
             line=None,
-            comments=tuple(_comment(c) for c in ((t.get("comments") or {}).get("nodes") or [])),
+            comments=_thread_comments(t),
             opener=_actor((((t.get("opener") or {}).get("nodes") or [{}])[0]).get("author"))[0],
         )
         for t in ((node.get("reviewThreads") or {}).get("nodes") or [])
@@ -755,7 +790,7 @@ def _parse_pr(node: dict) -> PullRequest:
             outdated=bool(t.get("isOutdated")),
             path=t.get("path") or "",
             line=t.get("line"),
-            comments=tuple(_comment(c) for c in ((t.get("comments") or {}).get("nodes") or [])),
+            comments=_thread_comments(t),
             opener=_actor((((t.get("opener") or {}).get("nodes") or [{}])[0]).get("author"))[0],
         )
         for t in ((node.get("reviewThreads") or {}).get("nodes") or [])

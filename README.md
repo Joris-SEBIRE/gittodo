@@ -132,10 +132,18 @@ pour elle.
 - Le bouclier, devant le nom de la branche, marque une review obligatoire encore en attente :
   CODEOWNERS l'a demandée, elle ne peut pas être contournée. Il tient cette ligne parce que la
   protection porte sur la branche visée. L'infobulle dit de qui la review est attendue.
+- Une PR ne paraît qu'une fois, dans sa catégorie la plus forte — celle qui vient le plus haut
+  dans le menu. Une PR en conflit dont un message attend ta réponse est *une* PR à traiter, pas
+  deux : elle se lit dans « On attend ma réponse », et son étiquette rouge « conflit » l'y suit.
+  Sans cette règle, elle compterait deux fois dans la pastille pour un seul geste.
 - Dans un titre de section, un compte suivi d'un `+` est un plancher : la liste est écrêtée, ou
   une recherche a buté sur sa limite. Sans `+`, le compte est exact, même s'il tombe pile sur le
   plafond. La pastille de la barre, elle, ne porte jamais de `+` : elle donne le nombre, et c'est
   le menu qui nomme ce qui a été écrêté.
+- Une ligne qui compte n'est jamais escamotée par l'écrêtage. Une section d'action n'est donc pas
+  écrêtée du tout, puisque chacune de ses lignes compte. Seules les sections informatives sont
+  bornées, et si l'une de leurs lignes compte encore, elle est rattrapée en fin de section, sous
+  la ligne « N de plus, non affichés ». L'ordre des autres ne bouge pas.
 - Un anneau se remplit autour de la photo, dans le sens horaire, jusqu'au prochain cycle : le
   délai avant la prochaine lecture se voit sans ouvrir le menu.
 - Une pastille violette en bas à gauche de la photo suit les PR sorties du périmètre ouvert :
@@ -145,6 +153,17 @@ pour elle.
   (sept jours par défaut), ou repoussée hors des lignes affichées par des clôtures plus récentes,
   elle reste dans l'histoire sans peser. Sans cette borne, un compte qu'aucune ligne visible ne
   porte plus ne pourrait plus s'éteindre.
+- Un message resté sans réponse, lui, ne s'éteint pas avec le temps : une PR clôturée suit
+  exactement les mêmes règles qu'une PR ouverte, la date du merge n'entrant pas en jeu. Une
+  demande posée juste avant la clôture attend autant qu'une autre — c'est même celle qu'on manque.
+  Les gestes qui l'acquittent dépendent de l'endroit : sur un fil de code, répondre, réagir d'un
+  emoji ou résoudre le fil ; dans la discussion générale, où il n'y a aucun fil à résoudre, réagir
+  ou répondre **en citant** le message. Reprendre la parole sans citer n'acquitte rien : une liste
+  plate ne dit pas à quoi on répond. Seuls 👍 et 👎 comptent par défaut (`acknowledge_reactions`) :
+  un 👀 dit qu'on a vu, pas qu'on a tranché.
+- Un commentaire de review laissé en brouillon ne compte pas comme une réponse : tant que la revue
+  n'est pas soumise, GitHub ne le montre qu'à toi. Le prendre pour de la parole ferait taire un
+  fil où l'autre attend toujours.
 
 Le menu se met à jour pendant qu'il est ouvert, sans qu'il faille le refermer.
 

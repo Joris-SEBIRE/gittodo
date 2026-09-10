@@ -104,8 +104,14 @@ de cent au plus et le menu signale la troncature au-delà, et l'API ne donne ni 
 numéro : `resolve_mentions()` les complète en une requête d'alias pour tout le lot. Ouvrir la \
 PR la marque lue côté GitHub et la retire de cette seconde source
 - PR clôturées : deux recherches `is:closed`, sur `author:` pour l'histoire de tes PR et \
-`involves:` pour ce qui s'y dit après, dans une requête mesurée à 3 points, sur sa propre \
-cadence. Elles portent déjà `mergedBy` et l'acteur de la fermeture, lu dans la timeline faute de \
+`involves:` pour ce qui s'y dit après, dans une requête mesurée à 33 points pour cinquante de \
+chaque, sur sa propre cadence. Une demande restée ouverte sur une PR déjà mergée ne se voit \
+nulle part ailleurs, et `involves:` étant triée par date de mise à jour, un message neuf ramène \
+de lui-même sa PR dans la fenêtre. Les messages sont lus aussi loin que sur une PR ouverte, \
+parce que c'est gratuit et que c'est là que ça se joue : une demande sans réponse se cachait au \
+douzième message d'une discussion. Les fils de code, eux, coûtent deux points chacun, et les \
+lire au-delà des quinze plus récents n'a rien trouvé de plus à la mesure : le quota vaut mieux \
+ailleurs. Ce qui n'a pas été lu est dit en bas du menu, jamais escamoté. Elles portent déjà `mergedBy` et l'acteur de la fermeture, lu dans la timeline faute de \
 `closedBy`, donc aucune requête de détail n'est nécessaire. `review-requested:` est écartée à la \
 mesure : 357 PR fermées y remontent sur trente jours, presque toutes par du bruit administratif
 - Branches : `GET /repos/{{dépôt}}/activity?actor=` donne qui a poussé, \
@@ -189,6 +195,13 @@ description de la PR au premier chef
 - une réaction posée sur un message le sort du compte : un point acté n'attend plus rien. \
 `acknowledge_reactions` fixe lesquelles, 👍 et 👎 par défaut, parce qu'un refus est une réponse. \
 Pas 👀, qui dit qu'on a vu et non qu'on a tranché
+- un commentaire de review resté en brouillon n'est pas de la parole : tant que la revue n'est \
+pas soumise, GitHub ne le montre qu'à son auteur. Le compter ferait taire un fil où quelqu'un \
+attend toujours ma réponse, alors que personne n'a rien reçu
+- une PR ne paraît qu'une fois, dans sa catégorie la plus forte, celle qui vient le plus haut \
+dans le menu. Une PR en conflit dont un message attend ta réponse est une PR, pas deux choses à \
+faire : elle se lit dans « On attend ma réponse », et son étiquette rouge « conflit » l'y suit. \
+Sans cette règle elle compterait deux fois dans la pastille pour un seul geste
 - rien n'est compté deux fois. « À reviewer » cède devant un message en attente, un avis déjà \
 rendu, ou `mergeable: CONFLICTING`. « Mes PR à merger » attend que les messages soient \
 traités. « Mes PR sans reviewer » se tait sur une PR bloquée
@@ -299,6 +312,15 @@ Deux comptes, deux coins. La pastille rouge, en haut à droite, est ce qu'il res
 PR ouvertes. La pastille violette, en bas à gauche, est le suivi des PR qui en sont sorties : les \
 messages restés sans réponse dessus, et les clôtures faites par quelqu'un d'autre que toi, \
 jusqu'à ce que tu ouvres la ligne. Le violet est la couleur dont GitHub colore une PR mergée.
+
+Un message sur une PR clôturée suit exactement les mêmes règles qu'une PR ouverte : la date de la \
+clôture n'entre pas en jeu, et une demande posée juste avant le merge attend autant qu'une autre. \
+Seuls les acquittements l'éteignent, et ils dépendent de l'endroit : sur un fil de code, répondre, \
+réagir d'un emoji ou résoudre le fil ; dans la discussion générale, où il n'y a aucun fil à \
+résoudre, réagir ou répondre **en citant** le message — reprendre la parole sans citer n'acquitte \
+rien, parce qu'une liste plate ne dit pas à quoi on répond. La clôture, elle, s'éteint au clic et \
+se périme ; la demande, non. Une section qui compte n'est jamais écrêtée, et dans l'histoire des \
+clôturées, une ligne qui compte encore est rattrapée en fin de section plutôt qu'escamotée.
 
 Par défaut, la photo de l'identité observée, une pastille rouge, et un anneau qui se remplit \
 dans le sens horaire jusqu'au prochain cycle. L'anneau s'efface pendant une lecture, où le \

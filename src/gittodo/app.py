@@ -824,6 +824,7 @@ class GitTodoApp(NSObject):
         self.notifications_limit = ""
         self.closures: list = []
         self.closures_at = None
+        self.closures_limit: list[str] = []
         # Sources actuellement dégradées : le triangle et sa section en vivent.
         self.health: dict[str, dict] = {}
         self.bar_shown = (0, False, "", 0)
@@ -891,20 +892,20 @@ class GitTodoApp(NSObject):
         les cinq minutes. Le dernier résultat sert entre deux passages.
         """
         if not self.cfg.show_closed:
-            self.closures, self.closures_at = [], None
+            self.closures, self.closures_at, self.closures_limit = [], None, []
             self.clear_incident("closed")
             return []
         age = None if self.closures_at is None else (now() - self.closures_at).total_seconds()
         if age is not None and age < max(20, self.cfg.closed_refresh_seconds):
             return self.closures
         try:
-            found, _ = self.client.fetch_closed(self.cfg.closed_days)
+            found, _, limit = self.client.fetch_closed(self.cfg.closed_days)
         except GitHubError as exc:
             log_error(f"suivi des clôturées ignoré : {type(exc).__name__}: {exc}")
             self.note_incident("closed", exc)
             return self.closures
         self.clear_incident("closed")
-        self.closures, self.closures_at = found, now()
+        self.closures, self.closures_at, self.closures_limit = found, now(), limit
         return found
 
     @objc.python_method
@@ -1209,6 +1210,7 @@ class GitTodoApp(NSObject):
             self.clear_incident("pull_requests")
             self.ask_service()
             closures = self.read_closures()
+            truncated = truncated + self.closures_limit
             snapshot = Snapshot(
                 items=build_items(prs, notifications, identity, self.cfg, self.branches, closures),
                 viewer=viewer,
@@ -1809,39 +1811,40 @@ class GitTodoApp(NSObject):
         group = GROUPS[kind]
         if menu.numberOfItems():
             menu.addItem_(NSMenuItem.separatorItem())
-        plafond = max(1, self.cfg.closed_history_rows if kind is Kind.RECENTLY_CLOSED else MAX_ROWS_PER_GROUP)
-        # L'ordre de la section ne bouge pas : c'est sa chronologie qui la rend lisible. Un
-        # compte évincé par l'écrêtage n'est donc pas remonté, il est reporté sur la ligne
-        # d'écrêtage, où il continue de s'additionner jusqu'au badge.
-        montrees, cachees = items[:plafond], items[plafond:]
+        # L'ordre de la section ne bouge pas : c'est sa chronologie qui la rend lisible. Une
+        # section actionnable n'est pas écrêtée : chacune de ses lignes compte dans le badge, et
+        # un compte sans ligne à cliquer ne pourrait plus s'éteindre. Une section informative,
+        # elle, est bornée pour de bon — mais si l'une de ses lignes compte quand même, elle est
+        # rattrapée en fin de section, après la ligne d'écrêtage, plutôt que d'être escamotée.
+        if group.is_action:
+            montrees, rattrapees, cachees = items, [], []
+        else:
+            rows = self.cfg.closed_history_rows if kind is Kind.RECENTLY_CLOSED else MAX_ROWS_PER_GROUP
+            plafond = max(1, rows)
+            montrees, restant = items[:plafond], items[plafond:]
+            rattrapees = [item for item in restant if item.weight]
+            cachees = [item for item in restant if not item.weight]
+        affichees = montrees + rattrapees
         # Le compte porte sur ce qui est affiché, et un « + » dit qu'il en reste derrière : un
         # nombre à son plafond ne le dit pas de lui-même. Les sections actionnables comptent
         # leurs notifications, pas leurs lignes, parce que c'est ce total qui monte jusqu'au badge.
-        total = sum(item.weight for item in montrees) if group.is_action else len(montrees)
+        total = sum(item.weight for item in affichees) if group.is_action else len(affichees)
         header = NSMenuItem.alloc().init()
         # La fenêtre reste en minuscules : seul le libellé est capitalisé, une unité criée se
         # lit mal.
         fenetre = self.window_of(kind)
         titre = group.label.upper() + (f" · {fenetre}" if fenetre else "")
-        header.setAttributedTitle_(_header(f"{titre} ({_capped(total, len(items) > plafond)})"))
+        header.setAttributedTitle_(_header(f"{titre} ({_capped(total, bool(cachees))})"))
         header.setImage_(_chrome_symbol(group.symbol, IDENTITY_TINT))
         header.setEnabled_(False)
         menu.addItem_(header)
         for item in montrees:
             self.add_row(menu, item)
         if cachees:
-            # Le reste des badges est porté par cette ligne, chaque nombre dans la couleur du
-            # badge auquel il va : la somme des pastilles visibles, celle-ci comprise, vaut
-            # toujours le badge, sans avoir à toucher à l'ordre des lignes.
-            restes = tuple(
-                (group.symbol, str(poids), teinte)
-                for poids, teinte in (
-                    (sum(item.weight for item in cachees if not item.closed), "systemRedColor"),
-                    (sum(item.weight for item in cachees if item.closed), SECOND_TINT),
-                )
-                if poids
-            )
-            self.add_info(menu, f"{len(cachees)} de plus, non affichés", "ellipsis", restes)
+            self.add_info(menu, f"{len(cachees)} de plus, non affichés", "ellipsis")
+        # Les rattrapées ferment la section : hors de la chronologie, mais devant les yeux.
+        for item in rattrapees:
+            self.add_row(menu, item)
 
     @objc.python_method
     def add_row(self, menu, item: Item) -> None:
@@ -1902,15 +1905,9 @@ class GitTodoApp(NSObject):
         return entry
 
     @objc.python_method
-    def add_info(self, menu, text: str, symbol: str = "", chips=()):
+    def add_info(self, menu, text: str, symbol: str = ""):
         info = NSMenuItem.alloc().init()
-        title = NSMutableAttributedString.alloc().initWithAttributedString_(
-            _note(text + ("   " if chips else ""))
-        )
-        if chips:
-            # Chaque pastille nomme sa propre couleur, donc pas de teinte de ligne à passer.
-            title.appendAttributedString_(_chip_run(chips))
-        info.setAttributedTitle_(title)
+        info.setAttributedTitle_(_note(text))
         if symbol:
             info.setImage_(_chrome_symbol(symbol))
         info.setEnabled_(False)

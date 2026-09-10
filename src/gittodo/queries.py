@@ -61,7 +61,7 @@ fragment PR on PullRequest {
     totalCount
     nodes { id isResolved isOutdated path line
       opener: comments(first:1){ nodes { author { __typename login } } }
-      comments(last:12){ totalCount nodes { author { __typename login avatarUrl(size: 64) } createdAt url body
+      comments(last:12){ totalCount nodes { state author { __typename login avatarUrl(size: 64) } createdAt url body
         reactionGroups { content viewerHasReacted } } } }
   }
   comments(last:15){ totalCount nodes { author { __typename login avatarUrl(size: 64) } createdAt url body
@@ -101,6 +101,14 @@ CLOSED_SEARCHES = {
 
 # `mergedBy` donne l'auteur d'un merge ; une fermeture sans merge n'a pas d'équivalent, son
 # acteur ne s'obtient que par la timeline.
+#
+# La profondeur des messages est celle de `PR_QUERY` parce qu'elle est gratuite, et c'est elle
+# qui compte : la discussion générale s'acquitte par citation, et une citation qu'on n'a pas lue
+# transforme un point réglé en demande éternelle. `reviewThreads`, lui, coûte deux points par fil
+# et par recherche, et le mesurer a montré qu'aller au-delà de quinze ne trouvait rien de plus :
+# le quota vaut mieux ailleurs. Ce sont les fils les plus récents qui sont lus, parce qu'une
+# demande en attente se trouve là et non dans les premiers échanges, et ce qui reste non lu est
+# annoncé en bas du menu.
 CLOSED_QUERY = """
 query($mine:String!,$involved:String!,$mine_n:Int!,$involved_n:Int!) {
   rateLimit { cost remaining }
@@ -116,11 +124,11 @@ fragment Fin on PullRequest {
   timelineItems(last: 1, itemTypes: [CLOSED_EVENT]) {
     nodes { ... on ClosedEvent { createdAt actor { login avatarUrl(size: 64) } } }
   }
-  comments(last: 6) { totalCount nodes { author { __typename login avatarUrl(size: 64) } createdAt url body
+  comments(last: 15) { totalCount nodes { author { __typename login avatarUrl(size: 64) } createdAt url body
     reactionGroups { content viewerHasReacted } } }
-  reviewThreads(first: 8) { nodes { id isResolved
+  reviewThreads(last: 15) { totalCount nodes { id isResolved
     opener: comments(first:1){ nodes { author { __typename login } } }
-    comments(last: 4) { nodes { author { __typename login avatarUrl(size: 64) } createdAt url body
+    comments(last: 12) { nodes { state author { __typename login avatarUrl(size: 64) } createdAt url body
       reactionGroups { content viewerHasReacted } } } } }
 }
 """

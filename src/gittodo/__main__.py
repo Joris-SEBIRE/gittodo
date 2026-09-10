@@ -46,10 +46,19 @@ def dump(argv: list[str]) -> int:
                 found = remote_branches.orphans(client, sorted(repos | set(cfg.branch_repos)), identity)
             except GitHubError as exc:
                 print(f"(branches indisponibles : {exc})")
+        # Le dump annonce ce que le menu contiendrait : sans les clôturées, il taisait justement
+        # les demandes que rien d'autre ne montre.
+        closures = []
+        if cfg.show_closed:
+            try:
+                closures, _, limit = client.fetch_closed(cfg.closed_days)
+                truncated = truncated + limit
+            except GitHubError as exc:
+                print(f"(suivi des clôturées indisponible : {exc})")
     except GitHubError as exc:
         print(f"Erreur : {exc}", file=sys.stderr)
         return 1
-    items = build_items(prs, notifications, identity, cfg, found)
+    items = build_items(prs, notifications, identity, cfg, found, closures)
     badge, _ = summarize(items)
     seen_as = f" (token de @{viewer})" if identity != viewer else ""
     print(f"@{identity}{seen_as} · {len(prs)} PR lues · badge {badge} · quota {rate}")

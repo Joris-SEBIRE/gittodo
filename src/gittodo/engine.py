@@ -255,21 +255,18 @@ def _item(
     )
 
 
-def _messages(
-    pr: PullRequest, me: str, ignored: set[str], acks: set[str], since=None, mine_closes: bool = False
-) -> list[Item]:
+def _messages(pr: PullRequest, me: str, ignored: set[str], acks: set[str]) -> list[Item]:
     """Les messages de la PR, regroupés en une ligne par PR.
 
     Un commentaire de code et un commentaire général sont la même chose : un message. Il
     attend soit ma réponse, soit ma vérification quand c'est une réponse à ce que j'ai
     ouvert. Le troisième cas, j'ai parlé en dernier, est du suivi, pas une action.
 
-    `since` ne retient que les messages postérieurs à une date, sans cacher le reste aux
-    règles : la citation doit pouvoir retrouver un message d'avant la clôture pour l'acquitter.
-
-    `mine_closes` rend mon dernier message clôturant, même sans citation. La règle de citation
-    protège une demande enterrée par un échange qui continue ; sur une PR fermée plus rien ne
-    continue, et la ligne resterait comptée sans aucun moyen de l'éteindre.
+    Une PR clôturée suit exactement les mêmes règles qu'une PR ouverte : une demande y attend
+    toujours quelque chose de moi, et le merge ne l'annule pas. Seuls les acquittements
+    l'éteignent, et ils ne sont pas les mêmes des deux côtés : sur un fil de code, répondre,
+    réagir ou résoudre le fil ; dans la discussion générale, où il n'y a aucun fil à résoudre,
+    réagir ou répondre en citant — reprendre la parole sans citer n'acquitte rien.
     """
     mine = pr.author == me
 
@@ -295,12 +292,8 @@ def _messages(
         # Un fil de code est une conversation : y répondre répond au fil. La discussion générale
         # est une liste plate, où seule une citation dit à quoi on répond.
         pending = (
-            _pending(humans, me, acks, silent)
-            if on_code or mine_closes
-            else _unanswered(humans, me, acks, silent)
+            _pending(humans, me, acks, silent) if on_code else _unanswered(humans, me, acks, silent)
         )
-        if since is not None:
-            pending = [c for c in pending if c.created_at > since]
         if pending:
             # Le fil que j'ai ouvert est à moi de le clore : je lis la réponse puis je résous.
             (to_check if opener == me else to_answer).extend((comment, on_code) for comment in pending)
@@ -605,10 +598,10 @@ def _html_url(api_url: str, repo: str) -> str:
 def closed_items(closures: list[Closure], me: str, cfg: Config) -> list[Item]:
     """Ce qui reste à faire, et ce qui s'est passé, sur les PR sorties du périmètre ouvert.
 
-    Les messages postérieurs à la clôture repassent par `_messages()` : citation, acquittement
-    par réaction et comptage s'appliquent sans être réécrits. Une clôture faite par quelqu'un
-    d'autre devient une ligne d'histoire. Ce que j'ai clôturé moi-même s'affiche sans compter,
-    puisque je le sais déjà.
+    Les messages repassent par `_messages()`, sans que la date de clôture n'entre en jeu : une
+    demande posée juste avant un merge attend autant qu'une autre, et c'est précisément celle
+    qu'on manque. Une clôture faite par quelqu'un d'autre devient une ligne d'histoire. Ce que
+    j'ai clôturé moi-même s'affiche sans compter, puisque je le sais déjà.
     """
     ignored, acks = cfg.ignored(), cfg.acknowledged()
     # L'histoire est bornée par la fenêtre annoncée dans le titre de la section. Un message
@@ -638,14 +631,17 @@ def closed_items(closures: list[Closure], me: str, cfg: Config) -> list[Item]:
         # l'infobulle et les lignes d'action dire l'ancien terme.
         etat = CLOSED_STATUS[bool(closure.merged)]
         par = f"{etat[1]} par @{closure.actor}" if closure.actor else etat[1]
-        for item in _messages(pr, me, ignored, acks, since=closure.at, mine_closes=True):
-            # « J'ai parlé en dernier » n'est pas une information sur une PR fermée : personne
-            # n'y répondra plus.
-            if item.kind is Kind.WAITING_REPLY:
-                continue
+        # « J'ai parlé en dernier » n'est pas une information sur une PR fermée : personne
+        # n'y répondra plus.
+        demandes = [i for i in _messages(pr, me, ignored, acks) if i.kind is not Kind.WAITING_REPLY]
+        for item in demandes:
             actions.append(
                 replace(item, closed=True, detail=join(item.detail, par), chips=item.chips + (etat,))
             )
+        if demandes:
+            # Une PR ne paraît qu'une fois, dans la section la plus forte : la ligne d'action dit
+            # déjà la clôture et son acteur, l'histoire ne ferait que la répéter plus bas.
+            continue
         if pr.author != me or closure.at < depuis:
             continue  # l'histoire, c'est celle de mes PR, dans la fenêtre annoncée
         histoire.append(
@@ -715,12 +711,27 @@ def build_items(
 
 
 def _dedupe(items: list[Item]) -> list[Item]:
+    """Une seule ligne par sujet, celle de sa catégorie la plus forte.
+
+    La liste arrive triée dans l'ordre des sections, donc la première rencontrée est la plus
+    importante. Une PR en conflit dont un message attend ma réponse n'est pas deux choses à
+    faire : c'est une PR, et c'est la réponse qu'on attend d'abord. Sans cette règle elle
+    compterait deux fois dans le badge, pour un seul geste. Rien n'est perdu au passage :
+    l'étiquette « conflit » et les drapeaux d'état sont portés par toutes ses lignes.
+
+    La clé est le sujet, pas la ligne : `id` vaut « catégorie:sujet », et c'est justement la
+    catégorie qu'on veut voir varier. Les notifications et les branches ont leur propre
+    espace de clés, ils ne peuvent pas se prendre l'un pour l'autre. `closed_items()` écarte
+    déjà l'histoire d'une PR clôturée qui porte une demande, pour que son plafond de lignes
+    ne compte pas des lignes vouées à disparaître ici.
+    """
     seen: set[str] = set()
     unique: list[Item] = []
     for item in items:
-        if item.id in seen:
+        subject = item.id.split(":", 1)[-1]
+        if subject in seen:
             continue
-        seen.add(item.id)
+        seen.add(subject)
         unique.append(item)
     return unique
 

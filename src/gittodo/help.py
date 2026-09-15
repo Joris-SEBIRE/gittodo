@@ -130,7 +130,9 @@ Empreinte identique, le cycle s'arrête là
 et un `isResolved` ne changent pas `updatedAt`, la sonde ne peut pas les voir
 - chaque cycle revalide aussi l'affichage, branches comprises. Une branche supprimée sort en 20 s
 - toutes les 5 min (`branch_refresh_seconds`), découverte des branches, dans son propre thread
-- ⌘R relance tout, sans passer par la sonde
+- ⌘R relance tout, sans passer par la sonde : les PR, les non-lues, les branches et les \
+clôturées. Ces trois dernières ont leur propre cadence, lente ; les réarmer est tout l'intérêt \
+du bouton, puisqu'on appuie dessus juste après avoir répondu, résolu ou poussé
 - sous 800 points restants, le rythme passe à 2 min et le menu le signale
 
 Le menu se met à jour pendant qu'il est ouvert.

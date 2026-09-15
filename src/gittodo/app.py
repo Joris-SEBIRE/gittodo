@@ -2093,12 +2093,16 @@ class GitTodoApp(NSObject):
         self.set_identity(None)
 
     def refresh_(self, sender):
-        self.notifications_at = None
         # Actualisation manuelle : on veut l'état réel, pas l'avis de la sonde — elle est
-        # aveugle aux réactions et aux fils résolus. Les branches sont relancées aussi :
-        # c'est juste après avoir supprimé ou poussé une branche qu'on appuie là.
+        # aveugle aux réactions et aux fils résolus. Toutes les sources à cadence lente sont
+        # donc réarmées, sans quoi le bouton ne servirait à rien là où on appuie dessus : on
+        # appuie juste après avoir répondu à un message, résolu un fil, poussé ou supprimé une
+        # branche. Les clôturées surtout, qui se lisent toutes les cinq minutes et portent
+        # précisément ces réponses.
         self.signature = ""
+        self.notifications_at = None
         self.branches_at = None
+        self.closures_at = None
         self.maybe_refresh_branches()
         self.start_fetch(spinner=True)
 

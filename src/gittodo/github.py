@@ -247,6 +247,14 @@ class GitHub:
                 pr = existing or _parse_pr(node)
                 pr.sources.add(source)
                 prs[pr.id] = pr
+        # Un avis rendu hors de la fenêtre de revues lue est un avis perdu : « approuvée » et
+        # « à corriger » se déduisent du dernier verdict de chacun, et sur une PR très commentée
+        # chaque commentaire en ligne crée une revue qui pousse les plus anciennes dehors. Une
+        # approbation qui sort ainsi ferait disparaître la PR de « Mes PR à merger » sans que
+        # rien n'ait changé chez GitHub.
+        deep = [pr.slug for pr in prs.values() if pr.reviews_count > len(pr.reviews)]
+        if deep:
+            truncated.append(f"revues non lues sur {', '.join(sorted(deep)[:3])}")
         rate = (data.get("rateLimit") or {}).get("remaining")
         self.viewer_face = (data.get("viewer") or {}).get("avatarUrl") or ""
         return list(prs.values()), data["viewer"]["login"], rate, truncated

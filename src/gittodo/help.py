@@ -93,7 +93,10 @@ rien n'est écrit dans le fichier de réglages.
 - PR : six recherches `is:open is:pr` dans une seule requête GraphQL, sur `author:`, \
 `user-review-requested:`, `commenter:`, `reviewed-by:`, `assignee:` et `mentions:`. Chaque PR remonte ses \
 `reviewThreads` avec `isResolved`, ses `comments`, ses `reactionGroups`, ses `reviews`, plus \
-`mergeable`, `statusCheckRollup`, `reviewRequests`, `headRefName` et `baseRefName`
+`mergeable`, `statusCheckRollup`, `reviewRequests`, `headRefName` et `baseRefName`. Les revues \
+sont lues loin — cinquante, et c'est gratuit : chaque commentaire en ligne en crée une, et une \
+approbation poussée hors de la fenêtre ferait sortir la PR de « Mes PR à merger » sans que rien \
+n'ait bougé. Au-delà, le menu le dit en bas
 - Mentions : deux sources. La recherche `mentions:` porte les PR ouvertes et survit à la \
 lecture, mais GitHub n'y indexe que la description et les commentaires généraux, pas les \
 commentaires de revue en ligne. `GET /notifications` (raisons `mention` et `team_mention`) \

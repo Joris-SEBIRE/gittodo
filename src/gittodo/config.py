@@ -123,8 +123,14 @@ class Config:
         return cfg
 
     def save(self) -> None:
+        """Écrit par un temporaire puis un renommage : le fil de fond relit ce fichier."""
         CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        CONFIG_PATH.write_text(json.dumps(asdict(self), indent=2, ensure_ascii=False) + "\n")
+        temporary = CONFIG_PATH.with_name(CONFIG_PATH.name + ".tmp")
+        try:
+            temporary.write_text(json.dumps(asdict(self), indent=2, ensure_ascii=False) + "\n")
+            os.replace(temporary, CONFIG_PATH)
+        except OSError:
+            temporary.unlink(missing_ok=True)
 
     def scoped(self, query: str) -> str:
         return " ".join([query.format(who=self.view_as or "@me"), *self.scope])

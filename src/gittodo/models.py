@@ -301,6 +301,8 @@ class Snapshot:
     # Identité observée : le propriétaire du token, ou la personne du mode « voir en tant que ».
     identity: str = ""
     fetched_at: datetime | None = None
+    # Dernière tentative, réussie ou non : c'est elle qui cadence le cycle suivant.
+    attempted_at: datetime | None = None
     rate_remaining: int | None = None
     error: str | None = None
     truncated: list[str] = field(default_factory=list)

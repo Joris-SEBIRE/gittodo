@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import fcntl
 import json
+import os
 import time
 
 from .config import STATE_PATH
@@ -40,13 +41,19 @@ def log_error(message: str) -> None:
         pass
 
 
-def write_status(status: dict) -> None:
-    """Reflète ce qu'affiche la barre des menus, pour pouvoir diagnostiquer sans la voir."""
+def _write_atomic(path, payload: str) -> None:
+    """Écrit par un temporaire puis un renommage : jamais de fichier lu à moitié écrit."""
     try:
-        STATUS_PATH.parent.mkdir(parents=True, exist_ok=True)
-        STATUS_PATH.write_text(json.dumps(status, indent=1, ensure_ascii=False) + "\n")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(path.suffix + ".part")
+        temporary.write_text(payload)
+        os.replace(temporary, path)
     except OSError:
         pass
+
+def write_status(status: dict) -> None:
+    """Reflète ce qu'affiche la barre des menus, pour pouvoir diagnostiquer sans la voir."""
+    _write_atomic(STATUS_PATH, json.dumps(status, indent=1, ensure_ascii=False) + "\n")
 
 
 def acquire_single_instance(attempts: int = 4, delay: float = 0.5) -> bool:
@@ -87,11 +94,9 @@ class State:
         self.scope = ""
 
     def save(self) -> None:
-        STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        STATE_PATH.write_text(
-            json.dumps(
-                {"dismissed": self.dismissed, "seen": self.seen, "opened": self.opened}, indent=1
-            )
+        _write_atomic(
+            STATE_PATH,
+            json.dumps({"dismissed": self.dismissed, "seen": self.seen, "opened": self.opened}, indent=1),
         )
 
     def key(self, item: Item) -> str:

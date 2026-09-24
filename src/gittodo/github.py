@@ -194,6 +194,12 @@ class GitHub:
             ) from exc
         except urllib.error.URLError as exc:
             raise GitHubError(f"Réseau indisponible ({exc.reason})") from exc
+        except OSError as exc:
+            # Délai dépassé, connexion coupée : urllib ne les emballe pas dans URLError.
+            raise GitHubError(f"Réseau interrompu ({exc})") from exc
+        except ValueError as exc:
+            # HTTP 200 avec du HTML dans le corps : portail captif, proxy d'entreprise.
+            raise GitHubError("Réponse illisible : portail captif ?") from exc
         except TimeoutError as exc:
             # urllib lève TimeoutError sans l'emballer dans URLError : sans cette branche,
             # une lenteur réseau tuait le cycle au lieu d'être une panne passagère.

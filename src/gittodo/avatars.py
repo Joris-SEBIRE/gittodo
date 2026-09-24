@@ -34,7 +34,10 @@ class Avatars:
         return CACHE_DIR / (hashlib.sha1(url.encode()).hexdigest()[:16] + ".img")
 
     def prefetch(self, urls: set[str]) -> None:
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        try:
+            CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return
         for url in urls:
             target = self.path_for(url)
             if target.exists() and (time.time() - target.stat().st_mtime) < MAX_AGE:
@@ -47,9 +50,13 @@ class Avatars:
                 continue
             if not data:
                 continue
-            temporary = target.with_suffix(".part")
-            temporary.write_bytes(data)
-            temporary.replace(target)
+            try:
+                temporary = target.with_suffix(".part")
+                temporary.write_bytes(data)
+                temporary.replace(target)
+            except OSError:
+                # Un cache d'images qu'on ne peut pas écrire ne doit pas coûter le cycle.
+                continue
             for key in [k for k in self.rendered if k[0] == url]:
                 del self.rendered[key]
 

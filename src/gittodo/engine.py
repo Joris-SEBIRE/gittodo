@@ -377,7 +377,7 @@ def _mine_items(pr: PullRequest, me: str, cfg: Config, talk: list[Item]) -> list
 
     def add(
         kind: Kind, hint: str, urgent: bool | None = None, note: str = "",
-        who: tuple = (), by: str = "",
+        who: tuple = (), by: str = "", at: datetime | None = None,
     ) -> None:
         # Le visage suit `who` quand il est renseigné : ce sont eux qu'on voit, c'est donc eux
         # que la ligne doit nommer.
@@ -387,7 +387,7 @@ def _mine_items(pr: PullRequest, me: str, cfg: Config, talk: list[Item]) -> list
         seen = next((pr.portraits[name] for name in who if pr.portraits.get(name)), pr.avatar)
         items.append(
             _item(
-                pr, kind, pr.id, pr.updated_at, avatar=seen, urgent=urgent, hint=hint, note=note,
+                pr, kind, pr.id, at or pr.updated_at, avatar=seen, urgent=urgent, hint=hint, note=note,
                 by=named,
                 faces=tuple(pr.portraits[name] for name in who if pr.portraits.get(name)),
             )
@@ -402,6 +402,7 @@ def _mine_items(pr: PullRequest, me: str, cfg: Config, talk: list[Item]) -> list
             f"{', '.join('@' + who for who in refused)} demande des changements",
             who=tuple(refused),
             by="refusée par",
+            at=pr.verdict_at(refused, "CHANGES_REQUESTED"),
         )
     # Un draft en conflit n'est pas une action : c'est un choix de le laisser en draft. Le
     # conflit est signalé sur sa ligne, dans la section Draft.
@@ -416,6 +417,7 @@ def _mine_items(pr: PullRequest, me: str, cfg: Config, talk: list[Item]) -> list
             f"approuvée par {', '.join('@' + who for who in approved)}, CI verte, sans conflit",
             who=tuple(approved),
             by="approuvée par",
+            at=pr.verdict_at(approved, "APPROVED"),
         )
     # Solliciter une review n'est pas le prochain geste si la PR est déjà bloquée.
     if live and not pr.reviewers and not pr.reviews and not items:

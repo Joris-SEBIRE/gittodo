@@ -233,6 +233,11 @@ class PullRequest:
                 latest[review.author] = review.state
         return latest
 
+    def verdict_at(self, names, state: str) -> datetime | None:
+        """Heure du dernier avis `state` de ces personnes : une ligne qui nomme un avis date cet avis."""
+        return max((r.submitted_at for r in self.reviews if r.author in names and r.state == state and r.submitted_at),
+                   default=None)
+
     def my_last_review(self, me: str) -> Review | None:
         mine = [review for review in self.reviews if review.author == me]
         return mine[-1] if mine else None

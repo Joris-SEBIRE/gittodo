@@ -22,13 +22,18 @@ from .models import GROUPS, ORDER, Closure, Comment, Item, Kind, PullRequest, pa
 CI_BROKEN = {"FAILURE", "ERROR"}
 CI_OK = {"SUCCESS", None}
 MAX_CHIPS = 5
-# Les deux fins possibles d'une PR, dans le glyphe et la couleur que GitHub leur donne : le
-# violet du merge, le rouge de la fermeture sans merge. Une PR clôturée n'a pas d'autre état,
-# `merged` étant un booléen du côté de GitHub comme du nôtre.
-CLOSED_STATUS = {
-    True: ("arrow.triangle.merge", "mergée", "githubMergedColor"),
-    False: ("xmark.circle", "fermée", "githubClosedColor"),
+# Les quatre états d'une PR, dans le glyphe, le mot et la couleur que GitHub leur donne : le vert
+# de l'ouverture, le gris du draft, le violet du merge, le rouge de la fermeture sans merge.
+PR_STATUS = {
+    "OPEN": ("arrow.triangle.pull", "ouverte", "githubOpenColor"),
+    "DRAFT": ("pencil.line", "draft", "githubDraftColor"),
+    "MERGED": ("arrow.triangle.merge", "mergée", "githubMergedColor"),
+    "CLOSED": ("xmark.circle", "fermée", "githubClosedColor"),
 }
+
+
+def _status(pr: PullRequest) -> tuple[str, str, str]:
+    return PR_STATUS["DRAFT" if pr.state == "OPEN" and pr.is_draft else pr.state]
 
 
 def _humans(comments: tuple[Comment, ...], ignored: set[str]) -> list[Comment]:
@@ -183,8 +188,6 @@ def _flags(pr: PullRequest) -> tuple[tuple[str, str], ...]:
     """Drapeaux d'état de la PR, sans nombre : ils ne comptent pas de notification."""
     verdicts = set(pr.verdicts().values())
     flags: list[tuple[str, str]] = []
-    if pr.is_draft:
-        flags.append(("pencil.line", ""))
     if pr.mergeable == "CONFLICTING":
         flags.append(("arrow.triangle.branch", ""))
     if pr.ci_state in CI_BROKEN:
@@ -200,7 +203,7 @@ def _flags(pr: PullRequest) -> tuple[tuple[str, str], ...]:
 
 def _item(
     pr: PullRequest, kind: Kind, key: str, at: datetime, url: str = "", counted: tuple = (),
-    note: str = "", status: tuple = (), by: str = "", **extra
+    note: str = "", by: str = "", **extra
 ) -> Item:
     """Une ligne : titre de la PR en haut, métadonnées uniformes en dessous.
 
@@ -219,8 +222,9 @@ def _item(
     poids en est déduit, ce qui garantit par construction que les nombres de la ligne
     s'additionnent jusqu'au badge. Sur une ligne informative, qui ne pèse rien par définition,
     ces nombres restent affichés mais en gris : ils disent combien, pas quoi faire. Une action sans décomposition compte pour elle-même,
-    avec l'icône de sa catégorie. `status` porte l'état de la PR, qui vient juste après les
-    nombres parce qu'il vaut pour toute la ligne. Les drapeaux d'état viennent après, sans nombre.
+    avec l'icône de sa catégorie. L'état de la PR — ouverte, draft, mergée ou fermée — vient
+    juste après les nombres parce qu'il vaut pour toute la ligne. Les drapeaux d'état viennent
+    après, sans nombre.
     """
     conflict = pr.mergeable == "CONFLICTING"
     # Une ligne compte si elle est actionnable, ou si elle relève du suivi des PR clôturées :
@@ -234,6 +238,7 @@ def _item(
     if conflict:
         taken.add("arrow.triangle.branch")
     flags = tuple(flag for flag in _flags(pr) if flag[0] not in taken)
+    status = (_status(pr),)
     return Item(
         id=f"{kind.value}:{key}",
         kind=kind,
@@ -652,14 +657,14 @@ def closed_items(closures: list[Closure], me: str, cfg: Config) -> list[Item]:
         pr = closure.pr
         # Le mot vient de la pastille : une seule source, sinon le renommer ici laisserait
         # l'infobulle et les lignes d'action dire l'ancien terme.
-        etat = CLOSED_STATUS[bool(closure.merged)]
+        etat = _status(pr)
         par = f"{etat[1]} par @{closure.actor}" if closure.actor else etat[1]
         # « J'ai parlé en dernier » n'est pas une information sur une PR fermée : personne
         # n'y répondra plus.
         demandes = [i for i in _messages(pr, me, ignored, acks) if i.kind is not Kind.WAITING_REPLY]
         for item in demandes:
             actions.append(
-                replace(item, closed=True, detail=join(item.detail, par), chips=item.chips + (etat,))
+                replace(item, closed=True, detail=join(item.detail, par))
             )
         if any(item.kind is not Kind.RESOLVED_THREADS for item in demandes):
             # Une PR ne paraît qu'une fois, dans la section la plus forte : la ligne d'action dit
@@ -677,7 +682,6 @@ def closed_items(closures: list[Closure], me: str, cfg: Config) -> list[Item]:
                 # Le visage est celui qui a clôturé : la ligne le nomme et dit son geste. Sans
                 # acteur connu, la photo retombe sur l'auteur, et la ligne le dit aussi.
                 by=par if closure.actor else f"PR de @{pr.author}",
-                status=(etat,),
                 avatar=closure.actor_avatar or pr.avatar,
                 hint=f"{par} le {closure.at:%d/%m à %H:%M}",
                 closed=True,

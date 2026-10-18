@@ -756,6 +756,7 @@ def _parse_closure(node: dict, source: str) -> Closure | None:
         author=author,
         avatar=author_avatar,
         is_draft=False,
+        state="MERGED" if merged else "CLOSED",
         created_at=quand,
         updated_at=parse_ts(node.get("updatedAt")) or quand,
         review_decision=None,

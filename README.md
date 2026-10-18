@@ -125,9 +125,9 @@ pour elle.
   reste sans visage.
 - Trois sortes de pastilles, et seulement trois. Chiffrée : elle prend la couleur de la ligne,
   rouge pour ce qu'il reste à faire, violet pour le suivi des PR clôturées et des fils résolus,
-  grise sur une ligne informative — le nombre dit alors combien, pas quoi faire. État de fin de
-  PR : la couleur de GitHub, violet `mergée` ou rouge `fermée`, sans nombre. Drapeau d'état :
-  gris, sans nombre.
+  grise sur une ligne informative — le nombre dit alors combien, pas quoi faire. État de la PR,
+  sur toute ligne de PR : le glyphe, le mot et la couleur de GitHub, vert `ouverte`, gris `draft`,
+  violet `mergée` ou rouge `fermée`, sans nombre. Drapeau d'état : gris, sans nombre.
 - Le délai « depuis X » prend la couleur de la pastille de la ligne, et reste gris quand la ligne
   ne compte rien.
 - Le bouclier, devant le nom de la branche, marque une review obligatoire encore en attente :
@@ -192,7 +192,8 @@ cycle, le compteur animé qui le remplace pendant une lecture, les titres de sec
 texte — et les titres de la fenêtre de réglages. Le suivi des PR clôturées et des fils résolus,
 lui, prend le violet dont GitHub colore un merge : compte secondaire, nombres de la ligne et état
 de la PR dans la même teinte. Le rouge dit l'urgence, sauf sur une PR fermée sans merge, où il dit
-la fin de la PR comme GitHub le fait. La section des pannes garde la couleur de son niveau : là,
+la fin de la PR comme GitHub le fait ; le vert d'une PR ouverte et le gris d'un draft ne servent
+qu'à son état, comme sur GitHub. La section des pannes garde la couleur de son niveau : là,
 l'alerte passe devant l'identité.
 
 ## Réglages

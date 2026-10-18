@@ -188,10 +188,13 @@ STACK_MAX = 3
 # Cercle de séparation de la pile : un nom à lui, sinon il écrase RING_WIDTH plus haut et
 # l'anneau de progression se retrouve peint à la largeur de la pile.
 STACK_RING = 1.2
-# Couleurs d'état de GitHub, la claire puis la sombre : le violet du merge et le rouge de la
-# fermeture sans merge. Reprendre les siennes plutôt que les couleurs système fait qu'une ligne
-# du menu dit la même chose, dans la même teinte, que la PR sur github.com.
+# Couleurs d'état de GitHub, la claire puis la sombre : le vert de l'ouverture, le gris du draft,
+# le violet du merge et le rouge de la fermeture sans merge. Reprendre les siennes plutôt que les
+# couleurs système fait qu'une ligne du menu dit la même chose, dans la même teinte, que la PR
+# sur github.com.
 GITHUB_COLOURS = {
+    "githubOpenColor": ((0x1A, 0x7F, 0x37), (0x3F, 0xB9, 0x50)),
+    "githubDraftColor": ((0x59, 0x63, 0x6E), (0x91, 0x98, 0xA1)),
     "githubMergedColor": ((0x82, 0x50, 0xDF), (0xA3, 0x71, 0xF7)),
     "githubClosedColor": ((0xCF, 0x22, 0x2E), (0xF8, 0x51, 0x49)),
 }

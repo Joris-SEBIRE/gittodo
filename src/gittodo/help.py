@@ -267,9 +267,10 @@ de quoi son compte est fait.
 Il y a donc trois sortes de pastilles, et seulement trois. Chiffrée : elle prend la couleur de \
 la ligne, et reste grise sur une ligne informative — « 11 » messages sans retour se comptent \
 comme les messages qui attendent ta réponse, avec les mêmes glyphes, mais rien n'est attendu de \
-toi et le nombre ne va dans aucun badge. État de fin de PR, sur une ligne clôturée : le glyphe et la \
-couleur que GitHub lui donne, violet `mergée` ou rouge `fermée`, sans nombre, parce qu'elle dit \
-ce qu'est devenue la PR et non ce qu'il reste à faire. Drapeau d'état : gris, sans nombre.
+toi et le nombre ne va dans aucun badge. État de la PR, sur toute ligne de PR : le glyphe, le \
+mot et la couleur que GitHub lui donne, vert `ouverte`, gris `draft`, violet `mergée` ou rouge \
+`fermée`, sans nombre, parce qu'il dit où en est la PR et non ce qu'il reste à faire. Drapeau \
+d'état : gris, sans nombre.
 
 Le bouclier, lui, n'est pas une pastille : il se dessine sur la troisième ligne, devant le nom \
 de la branche, parce qu'une review obligatoire protège la branche visée et non la PR. Il dit \
@@ -323,10 +324,10 @@ parle. Cette couleur ne dit rien de l'état, seulement *qui* affiche.
 On la trouve à trois endroits : l'anneau du prochain cycle et le compteur animé qui le \
 remplace, les titres de section — icône et texte — et les titres de cette fenêtre. Le suivi des \
 PR clôturées et des fils résolus, lui, ne porte pas l'identité mais le violet de GitHub, celui \
-d'un merge. Le rouge \
-dit l'urgence, sauf sur une PR fermée sans merge, où il dit la fin de la PR comme GitHub le \
-fait. Et la section des pannes garde la couleur de son niveau, jaune, orange ou rouge : là, \
-l'alerte passe devant l'identité.
+d'un merge. Le rouge dit l'urgence, sauf sur une PR fermée sans merge, où il dit la fin de la PR \
+comme GitHub le fait ; le vert d'une PR ouverte et le gris d'un draft ne servent qu'à son état, \
+comme sur GitHub. Et la section des pannes garde la couleur de son niveau, jaune, orange ou \
+rouge : là, l'alerte passe devant l'identité.
 
 ## Icône de la barre
 

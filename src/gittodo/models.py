@@ -224,6 +224,8 @@ class PullRequest:
     # Photo par login, alimentée par l'auteur, les reviewers et les messages : de quoi mettre
     # un visage sur n'importe qui est nommé dans une ligne.
     portraits: dict[str, str] = field(default_factory=dict)
+    # OPEN, MERGED ou CLOSED, comme GitHub. Un draft est une PR OPEN dont `is_draft` est vrai.
+    state: str = "OPEN"
 
     @property
     def slug(self) -> str:

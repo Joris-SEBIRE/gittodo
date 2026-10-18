@@ -12,7 +12,7 @@ import os
 import time
 
 from .config import STATE_PATH
-from .models import Item
+from .models import Item, Kind
 
 LOCK_PATH = STATE_PATH.parent / "gittodo.lock"
 STATUS_PATH = STATE_PATH.parent / "status.json"
@@ -88,8 +88,9 @@ class State:
         # {clé: empreinte} — l'entrée expire dès que l'élément bouge sur GitHub.
         self.dismissed: dict[str, str] = dict(raw.get("dismissed") or {})
         self.seen: dict[str, str] = dict(raw.get("seen") or {})
-        # Lignes du suivi des PR clôturées déjà ouvertes : elles cessent alors de compter dans
-        # la pastille violette, tout en restant dans la liste pour y revenir.
+        # Lignes violettes déjà ouvertes : l'histoire des clôturées cesse alors de compter, tout
+        # en restant dans la liste pour y revenir. Pour une ligne de fils résolus, la valeur est
+        # la liste des messages ouverts, séparés par une espace.
         self.opened: dict[str, str] = dict(raw.get("opened") or {})
         self.scope = ""
 
@@ -126,13 +127,27 @@ class State:
             self.opened[self.key(item)] = item.fingerprint
         self.save()
 
+    def unread(self, item: Item) -> tuple[str, ...]:
+        """Messages d'une ligne de fils résolus qui n'ont pas encore été ouverts."""
+        read = set(self.opened.get(self.key(item), "").split())
+        return tuple(url for url in item.messages if url not in read)
+
+    def mark_read(self, item: Item) -> None:
+        """Retient le message que la ligne vient d'ouvrir, et oublie ceux qu'elle ne compte plus."""
+        key = self.key(item)
+        read = set(self.opened.get(key, "").split()) & set(item.messages) | {item.url}
+        self.opened[key] = " ".join(sorted(read))
+        self.save()
+
     def knows_closed(self) -> bool:
         """A-t-on déjà vu passer du suivi de clôtures pour cette identité ?
 
         Sert à ne pas servir un mois d'historique comme autant de nouveautés au premier
-        lancement : ce qui précède la première observation est marqué ouvert d'office.
+        lancement : ce qui précède la première observation est marqué ouvert d'office. Seules
+        les clés de l'histoire en témoignent, un fil résolu déjà lu n'en dit rien.
         """
-        return any(self.in_scope(key) for key in self.opened)
+        history = f"{Kind.RECENTLY_CLOSED.value}:"
+        return any(self.in_scope(key) and key.rpartition(SEPARATOR)[2].startswith(history) for key in self.opened)
 
     def dismissed_here(self) -> list[str]:
         return [key for key in self.dismissed if self.in_scope(key)]
@@ -148,15 +163,25 @@ class State:
         self.save()
 
     def prune(self, items: list[Item]) -> None:
-        """Oublie les éléments disparus, sans toucher aux autres identités."""
-        alive = {self.key(item) for item in items}
+        """Oublie les éléments disparus, sans toucher aux autres identités.
 
-        def keep(store: dict[str, str]) -> dict[str, str]:
-            return {k: v for k, v in store.items() if not self.in_scope(k) or k in alive}
+        Sauf les messages ouverts des fils résolus : leur ligne peut manquer un cycle — PR tout
+        juste mergée que le cache des clôturées ne connaît pas encore, recherche écrêtée, suivi
+        des clôturées coupé — et les oublier la rallumerait pour des messages déjà lus. Une
+        entrée par PR, réduite à ses messages à chaque clic.
+        """
+        alive = {self.key(item) for item in items}
+        resolved = f"{Kind.RESOLVED_THREADS.value}:"
+
+        def keep(store: dict[str, str], lasting: str = "") -> dict[str, str]:
+            return {
+                k: v for k, v in store.items()
+                if not self.in_scope(k) or k in alive or (lasting and k.rpartition(SEPARATOR)[2].startswith(lasting))
+            }
 
         self.dismissed = keep(self.dismissed)
         self.seen = keep(self.seen)
-        self.opened = keep(self.opened)
+        self.opened = keep(self.opened, resolved)
 
     def visible(self, items: list[Item]) -> list[Item]:
         return [item for item in items if not self.is_dismissed(item)]

@@ -264,9 +264,15 @@ def _messages(pr: PullRequest, me: str, ignored: set[str], acks: set[str]) -> li
 
     Une PR clôturée suit exactement les mêmes règles qu'une PR ouverte : une demande y attend
     toujours quelque chose de moi, et le merge ne l'annule pas. Seuls les acquittements
-    l'éteignent, et ils ne sont pas les mêmes des deux côtés : sur un fil de code, répondre,
-    réagir ou résoudre le fil ; dans la discussion générale, où il n'y a aucun fil à résoudre,
-    réagir ou répondre en citant — reprendre la parole sans citer n'acquitte rien.
+    l'éteignent, et ils ne sont pas les mêmes des deux côtés : sur un fil de code, répondre ou
+    réagir ; dans la discussion générale, où il n'y a aucun fil à résoudre, réagir ou répondre
+    en citant — reprendre la parole sans citer n'acquitte rien.
+
+    Résoudre un fil le sort du rouge sans rien acquitter : GitHub ne date pas la résolution, et
+    un message écrit après ma dernière intervention peut l'avoir suivie. Il compte en violet,
+    puisque GitHub replie le fil et que rien d'autre ne le montrerait. Sur la PR d'autrui,
+    l'ouvrir suffit : l'auteur qui répond et résout a clos le point. Sur la mienne, il peut
+    s'agir de quelque chose à traiter : seuls une réponse ou une réaction l'éteignent.
     """
     mine = pr.author == me
 
@@ -276,12 +282,13 @@ def _messages(pr: PullRequest, me: str, ignored: set[str], acks: set[str]) -> li
 
     to_answer: list[tuple[Comment, bool]] = []
     to_check: list[tuple[Comment, bool]] = []
+    to_read: list[tuple[Comment, bool]] = []
     awaited: dict[str, Comment] = {}
     # Mes messages restés sans retour, un par conversation, avec leur nature : de quoi les
     # compter comme on compte ceux qui m'attendent.
     unanswered_mine: list[tuple[Comment, bool]] = []
 
-    def collect(humans: list[Comment], opener: str, on_code: bool = True) -> None:
+    def collect(humans: list[Comment], opener: str, on_code: bool = True, resolved: bool = False) -> None:
         last = humans[-1]
         speakers = {c.author for c in humans}
         # Me nommer me met dans la conversation : une question posée à moi attend une réponse
@@ -294,10 +301,12 @@ def _messages(pr: PullRequest, me: str, ignored: set[str], acks: set[str]) -> li
         pending = (
             _pending(humans, me, acks, silent) if on_code else _unanswered(humans, me, acks, silent)
         )
-        if pending:
+        if pending and resolved:
+            to_read.extend((comment, on_code) for comment in pending)
+        elif pending:
             # Le fil que j'ai ouvert est à moi de le clore : je lis la réponse puis je résous.
             (to_check if opener == me else to_answer).extend((comment, on_code) for comment in pending)
-        elif last.author == me:
+        elif last.author == me and not resolved:
             # On attend l'autre partie : l'auteur sur la PR d'autrui, le reviewer sur la mienne.
             # Tous ceux dont on attend une réponse, pas seulement le premier : la ligne montre
             # leurs visages, et l'infobulle les nomme.
@@ -312,16 +321,14 @@ def _messages(pr: PullRequest, me: str, ignored: set[str], acks: set[str]) -> li
                 awaited.setdefault(other, last)
 
     for thread in pr.threads:
-        if thread.resolved:
-            continue
         if humans := speech(thread.comments):
-            collect(humans, thread.opener or humans[0].author)
+            collect(humans, thread.opener or humans[0].author, resolved=thread.resolved)
     if humans := speech(pr.comments):
         collect(humans, humans[0].author, on_code=False)
 
     items: list[Item] = []
 
-    def add(kind: Kind, batch: list[tuple[Comment, bool]], verb: str, by: str) -> None:
+    def add(kind: Kind, batch: list[tuple[Comment, bool]], verb: str, by: str, key: str = pr.id, **extra) -> None:
         if not batch:
             return
         comments = [comment for comment, _ in batch]
@@ -339,12 +346,13 @@ def _messages(pr: PullRequest, me: str, ignored: set[str], acks: set[str]) -> li
         who = ", ".join("@" + name for name in sorted({c.author for c in comments}))
         items.append(
             _item(
-                pr, kind, pr.id, latest, oldest.url,
+                pr, kind, key, latest, oldest.url,
                 counted=((ON_CODE, on_code), (IN_DISCUSSION, general)),
                 by=f"{by} {who}",
                 avatar=oldest.avatar,
                 faces=tuple(face for face in speaking.values() if face),
-                hint=f"{len(batch)} message(s) de {who} {verb} : {', '.join(parts)}",
+                hint=extra.pop("hint", f"{len(batch)} message(s) de {who} {verb} : {', '.join(parts)}"),
+                **extra,
             )
         )
 
@@ -366,6 +374,19 @@ def _messages(pr: PullRequest, me: str, ignored: set[str], acks: set[str]) -> li
                 hint=f"{len(unanswered_mine)} message(s) de toi sans retour, tu attends {noms}",
             )
         )
+    # Sa propre clé : lu, il disparaît, et la ligne qu'il aurait évincée de la PR doit rester.
+    who = ", ".join("@" + name for name in sorted({comment.author for comment, _ in to_read}))
+    add(
+        Kind.RESOLVED_THREADS, to_read, "", "écrit par", key=f"{pr.id}:resolved", closed=True,
+        messages=() if mine else tuple(
+            comment.url for comment, _ in sorted(to_read, key=lambda pair: pair[0].created_at)
+        ),
+        hint=(
+            f"messages de {who} dans des fils résolus de ta PR : une réponse ou une réaction les acquitte"
+            if mine
+            else f"messages de {who} dans des fils résolus : chaque clic ouvre le plus ancien pas encore ouvert"
+        ),
+    )
     return items
 
 
@@ -640,9 +661,10 @@ def closed_items(closures: list[Closure], me: str, cfg: Config) -> list[Item]:
             actions.append(
                 replace(item, closed=True, detail=join(item.detail, par), chips=item.chips + (etat,))
             )
-        if demandes:
+        if any(item.kind is not Kind.RESOLVED_THREADS for item in demandes):
             # Une PR ne paraît qu'une fois, dans la section la plus forte : la ligne d'action dit
-            # déjà la clôture et son acteur, l'histoire ne ferait que la répéter plus bas.
+            # déjà la clôture et son acteur, l'histoire ne ferait que la répéter plus bas. Un
+            # message dans un fil résolu, lui, disparaît une fois lu : l'histoire doit lui survivre.
             continue
         if pr.author != me or closure.at < depuis:
             continue  # l'histoire, c'est celle de mes PR, dans la fenêtre annoncée
@@ -683,7 +705,9 @@ def build_items(
         if pr.is_draft and pr.author != me:
             continue
         talk = _messages(pr, me, ignored, cfg.acknowledged())
-        found = _mine_items(pr, me, cfg, talk) if pr.author == me else _others_items(pr, me, cfg, talk)
+        # Ce qui s'écrit dans un fil résolu se lit sans rien retenir : la PR garde ses lignes.
+        live = [item for item in talk if item.kind is not Kind.RESOLVED_THREADS]
+        found = _mine_items(pr, me, cfg, live) if pr.author == me else _others_items(pr, me, cfg, live)
         items += talk + found
     if cfg.include_mentions:
         # Toutes les PR chargées, pas seulement celles qui ont produit une action : sinon la
@@ -722,10 +746,11 @@ def _dedupe(items: list[Item]) -> list[Item]:
     l'étiquette « conflit » et les drapeaux d'état sont portés par toutes ses lignes.
 
     La clé est le sujet, pas la ligne : `id` vaut « catégorie:sujet », et c'est justement la
-    catégorie qu'on veut voir varier. Les notifications et les branches ont leur propre
-    espace de clés, ils ne peuvent pas se prendre l'un pour l'autre. `closed_items()` écarte
-    déjà l'histoire d'une PR clôturée qui porte une demande, pour que son plafond de lignes
-    ne compte pas des lignes vouées à disparaître ici.
+    catégorie qu'on veut voir varier. Les notifications, les branches et les messages écrits
+    dans un fil résolu ont leur propre espace de clés : ces derniers disparaissent une fois
+    lus, et la ligne de la PR qu'ils auraient évincée ne doit pas partir avec eux.
+    `closed_items()` écarte déjà l'histoire d'une PR clôturée qui porte une demande, pour que
+    son plafond de lignes ne compte pas des lignes vouées à disparaître ici.
     """
     seen: set[str] = set()
     unique: list[Item] = []
@@ -744,8 +769,23 @@ def summarize(items: list[Item]) -> tuple[int, bool]:
     return sum(i.weight for i in actions), any(i.is_urgent for i in actions)
 
 
+def unread_resolved(item: Item, unread: tuple[str, ...]) -> Item | None:
+    """La ligne de fils résolus réduite à ses messages pas encore ouverts, ou rien s'il n'en reste pas.
+
+    La ligne regroupe les fils d'une PR, mais GitHub replie chacun d'eux : un clic n'en montre
+    qu'un. Elle pointe donc sur le plus ancien qui reste, et ne compte que ceux-là.
+    """
+    if not unread:
+        return None
+    chips = tuple(
+        (name, str(len(unread)), *rest) if name == ON_CODE else (name, label, *rest)
+        for name, label, *rest in item.chips
+    )
+    return replace(item, url=unread[0], weight=len(unread), chips=chips)
+
+
 def summarize_closed(items: list[Item]) -> int:
-    """Somme du suivi des PR sorties du périmètre : c'est le badge violet."""
+    """Somme du suivi de ce que GitHub tient pour clos, PR fermées et fils résolus : c'est le badge violet."""
     return sum(i.weight for i in items if i.closed)
 
 

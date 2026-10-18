@@ -168,8 +168,9 @@ restent affichées, et le dernier balayage connu est conservé.
 ## Sections
 
 Les premières attendent un geste et comptent dans la pastille rouge de la barre. Les suivantes \
-non. Une PR sortie du périmètre ouvert compte à part, dans la pastille violette : les deux sommes \
-valent chacune leur badge, et ne se mélangent jamais.
+non. Ce que GitHub tient pour clos, une PR sortie du périmètre ouvert ou un fil résolu, compte à \
+part, dans la pastille violette : les deux sommes valent chacune leur badge, et ne se mélangent \
+jamais.
 
 ### À faire
 
@@ -182,12 +183,24 @@ valent chacune leur badge, et ne se mélangent jamais.
 ## Règles
 
 - un commentaire de code et un commentaire général sont un même objet, un message. Tous ceux \
-d'une PR tiennent sur une ligne
+d'une PR tiennent sur une ligne, sauf ceux des fils résolus, qui ont la leur dans « Écrit dans \
+des fils résolus »
 - un fil de code est une conversation : y répondre répond au fil, et ce qui suit ta dernière \
 intervention reste en attente. La discussion générale est une liste plate : seule une citation \
 à chevrons, celle que GitHub écrit avec « Quote reply », y marque un message comme traité. \
 Reprendre la parole sans citer ne clôt rien, et une commande de bot comme `/run-e2e` n'est pas \
 une prise de parole
+- résoudre un fil le sort du rouge sans rien acquitter, parce que GitHub ne date pas la \
+résolution : `PullRequestReviewThread` n'a pas de `resolvedAt`, et ni la timeline ni le flux \
+d'événements ne la mentionnent. Rien ne dit donc qu'un message l'a précédée. Les messages \
+d'autrui que rien n'acquitte depuis ta dernière intervention — tout le fil si tu n'y as jamais \
+parlé — comptent en violet, dans « Écrit dans des fils résolus » : GitHub replie ces fils, un \
+par un, et c'est là qu'un message passe inaperçu. Sur la PR d'un autre, les ouvrir suffit, \
+l'auteur qui répond et résout ayant clos le point : chaque clic ouvre le plus ancien pas encore \
+ouvert et n'éteint que lui. Sur la tienne, il peut s'agir de quelque chose à traiter : seuls une \
+réponse ou une réaction les éteignent, comme sur une PR clôturée. Réagir 👍 avant de résoudre \
+évite l'un comme l'autre. Ce que tu as écrit en dernier dans un fil résolu, en revanche, \
+n'attend plus personne
 - une citation désigne le message dont elle reprend le plus de lignes. Si deux messages \
 correspondent autant l'un que l'autre, aucun n'est acquitté : mieux vaut deux lignes en attente \
 qu'une demande effacée par erreur. Une réaction les départage
@@ -206,7 +219,9 @@ attend toujours ma réponse, alors que personne n'a rien reçu
 - une PR ne paraît qu'une fois, dans sa catégorie la plus forte, celle qui vient le plus haut \
 dans le menu. Une PR en conflit dont un message attend ta réponse est une PR, pas deux choses à \
 faire : elle se lit dans « On attend ma réponse », et son étiquette rouge « conflit » l'y suit. \
-Sans cette règle elle compterait deux fois dans la pastille pour un seul geste
+Sans cette règle elle compterait deux fois dans la pastille pour un seul geste. Seule exception, \
+« Écrit dans des fils résolus » : sa ligne disparaît une fois lue, et la PR garde la sienne \
+ailleurs pour ne pas partir avec elle
 - rien n'est compté deux fois. « À reviewer » cède devant un message en attente, un avis déjà \
 rendu, ou `mergeable: CONFLICTING`. « Mes PR à merger » attend que les messages soient \
 traités. « Mes PR sans reviewer » se tait sur une PR bloquée
@@ -243,7 +258,8 @@ Aucune ligne ne reste sans visage : une branche, qui n'a pas d'auteur au sens de
 celui du dernier à avoir poussé, retrouvé dans les PR déjà lues.
 
 Le délai et les pastilles chiffrées prennent la couleur de la pastille de la ligne — rouge pour \
-ce qu'il reste à faire, violet pour le suivi des PR clôturées — et restent gris sur une ligne qui \
+ce qu'il reste à faire, violet pour le suivi des PR clôturées et des fils résolus — et restent \
+gris sur une ligne qui \
 ne compte rien. Les drapeaux d'état, eux, ne comptent rien et gardent leur gris. Le délai est \
 l'information qu'on cherche en premier sur une ligne qui attend ; les pastilles chiffrées disent \
 de quoi son compte est fait.
@@ -306,7 +322,8 @@ parle. Cette couleur ne dit rien de l'état, seulement *qui* affiche.
 
 On la trouve à trois endroits : l'anneau du prochain cycle et le compteur animé qui le \
 remplace, les titres de section — icône et texte — et les titres de cette fenêtre. Le suivi des \
-PR clôturées, lui, ne porte pas l'identité mais le violet de GitHub, celui d'un merge. Le rouge \
+PR clôturées et des fils résolus, lui, ne porte pas l'identité mais le violet de GitHub, celui \
+d'un merge. Le rouge \
 dit l'urgence, sauf sur une PR fermée sans merge, où il dit la fin de la PR comme GitHub le \
 fait. Et la section des pannes garde la couleur de son niveau, jaune, orange ou rouge : là, \
 l'alerte passe devant l'identité.
@@ -314,18 +331,22 @@ l'alerte passe devant l'identité.
 ## Icône de la barre
 
 Deux comptes, deux coins. La pastille rouge, en haut à droite, est ce qu'il reste à faire sur les \
-PR ouvertes. La pastille violette, en bas à gauche, est le suivi des PR qui en sont sorties : les \
-messages restés sans réponse dessus, et les clôtures faites par quelqu'un d'autre que toi, \
-jusqu'à ce que tu ouvres la ligne. Le violet est la couleur dont GitHub colore une PR mergée.
+PR ouvertes. La pastille violette, en bas à gauche, est le suivi de ce que GitHub tient pour \
+clos : les messages restés sans réponse sur les PR sorties du périmètre ouvert, les clôtures \
+faites par quelqu'un d'autre que toi, et les messages non acquittés des fils résolus. Les \
+clôtures, et les fils résolus des PR d'autrui, s'éteignent quand tu ouvres la ligne. Le violet \
+est la couleur dont GitHub colore une PR mergée.
 
 Un message sur une PR clôturée suit exactement les mêmes règles qu'une PR ouverte : la date de la \
 clôture n'entre pas en jeu, et une demande posée juste avant le merge attend autant qu'une autre. \
-Seuls les acquittements l'éteignent, et ils dépendent de l'endroit : sur un fil de code, répondre, \
-réagir d'un emoji ou résoudre le fil ; dans la discussion générale, où il n'y a aucun fil à \
-résoudre, réagir ou répondre **en citant** le message — reprendre la parole sans citer n'acquitte \
-rien, parce qu'une liste plate ne dit pas à quoi on répond. La clôture, elle, s'éteint au clic et \
-se périme ; la demande, non. Une section qui compte n'est jamais écrêtée, et dans l'histoire des \
-clôturées, une ligne qui compte encore est rattrapée en fin de section plutôt qu'escamotée.
+Seuls les acquittements l'éteignent, et ils dépendent de l'endroit : sur un fil de code, répondre \
+ou réagir d'un emoji — le résoudre le fait seulement passer dans « Écrit dans des fils résolus » ; \
+dans la discussion générale, où il n'y a aucun fil à résoudre, réagir ou répondre **en citant** \
+le message — reprendre la parole sans citer n'acquitte rien, parce qu'une liste plate ne dit pas \
+à quoi on répond. La clôture, elle, s'éteint au clic et se périme, le message d'un fil résolu \
+sur la PR d'autrui s'éteint au clic ; la demande, non, ni le message d'un fil résolu sur ta PR. Une section qui compte n'est jamais écrêtée, et dans \
+l'histoire des clôturées, une ligne qui compte encore est rattrapée en fin de section plutôt \
+qu'escamotée.
 
 Par défaut, la photo de l'identité observée, une pastille rouge, et un anneau qui se remplit \
 dans le sens horaire jusqu'au prochain cycle. L'anneau s'efface pendant une lecture, où le \
@@ -348,8 +369,15 @@ def _sections(action: bool) -> str:
 DESCRIPTIONS = {
     "review_requested": "`user-review-requested:` sur la PR d'un autre, et tu n'as rien posé dessus. Nominatif seulement : une review demandée à une équipe dont tu fais partie n'y entre pas, sauf si tu décoches « Reviews nominatives seules »",
     "review_again": "tu as demandé des changements, l'auteur a poussé depuis",
-    "replies_to_check": "on a répondu dans un fil que tu as ouvert : à lire, puis à résoudre",
+    "replies_to_check": "on a répondu dans un fil que tu as ouvert : à lire, puis à résoudre. \
+Résolu sans réaction, le message passe dans « Écrit dans des fils résolus », le temps d'un clic \
+sur la PR d'autrui, jusqu'à une réponse ou une réaction sur la tienne ; un 👍 avant de résoudre \
+l'acquitte",
     "messages_to_answer": "des messages attendent ta réponse ; la pastille les compte",
+    "resolved_threads": "un fil résolu porte un message d'autrui que rien n'acquitte depuis ta \
+dernière intervention. Rien ne dit que la résolution l'a suivi : la ligne compte en violet, sans \
+retenir les autres lignes de la PR. Sur la PR d'autrui, chaque clic ouvre le plus ancien pas \
+encore ouvert et n'éteint que lui. Sur la tienne, seuls une réponse ou une réaction l'éteignent",
     "mention": "on t'a nommé et tu n'as pas encore répondu ; une mention dans un message \
 compte comme un message à traiter, cette section porte le reste",
     "changes_requested": "un reviewer a posé `CHANGES_REQUESTED` sur ta PR",

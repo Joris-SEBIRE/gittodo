@@ -25,6 +25,7 @@ class Kind(str, Enum):
     READY_TO_MERGE = "ready_to_merge"
     NO_REVIEWER = "no_reviewer"
     ASSIGNED = "assigned"
+    RESOLVED_THREADS = "resolved_threads"
     WAITING_REPLY = "waiting_reply"
     WAITING_REVIEW = "waiting_review"
     BLOCKED_FOR_AUTHOR = "blocked_for_author"
@@ -61,6 +62,9 @@ GROUPS: dict[Kind, Group] = {
     Kind.CI_FAILING: Group(Kind.CI_FAILING, "Mes PR avec CI rouge", "xmark.octagon", True, True),
     Kind.READY_TO_MERGE: Group(Kind.READY_TO_MERGE, "Mes PR à merger", "checkmark.seal", True),
     Kind.NO_REVIEWER: Group(Kind.NO_REVIEWER, "Mes PR sans reviewer", "person.badge.plus", True),
+    # Un fil résolu est clos comme une PR fermée : ce qu'on y écrit après coup compte en violet,
+    # jusqu'à ce qu'on l'ouvre. GitHub replie ces fils, c'est là qu'un message passe inaperçu.
+    Kind.RESOLVED_THREADS: Group(Kind.RESOLVED_THREADS, "Écrit dans des fils résolus", "checkmark.bubble", True),
     Kind.WAITING_REVIEW: Group(Kind.WAITING_REVIEW, "Mes PR en attente de review", "clock", False),
     Kind.WAITING_REPLY: Group(Kind.WAITING_REPLY, "Mes messages sans retour", "hourglass", False),
     Kind.DRAFT: Group(Kind.DRAFT, "Mes PR en draft", "pencil.line", False),
@@ -275,9 +279,13 @@ class Item:
     tag: str = ""
     # None = l'urgence par défaut de la catégorie.
     urgent: bool | None = None
-    # La PR n'est plus ouverte : la ligne compte dans la pastille violette, pas dans la rouge.
+    # La PR est fermée ou le fil résolu : la ligne compte dans la pastille violette, pas dans la rouge.
     # Les deux sommes restent égales à leur badge respectif.
     closed: bool = False
+    # Adresses des messages que compte une ligne de fils résolus, du plus ancien au plus récent :
+    # chaque clic ouvre le premier qui n'a pas encore été ouvert, et n'éteint que lui. Vide sur ma
+    # propre PR, où seuls une réponse ou une réaction éteignent la ligne.
+    messages: tuple[str, ...] = ()
 
     @property
     def group(self) -> Group:

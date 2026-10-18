@@ -63,7 +63,7 @@ from . import IDENTITY_TINT, branches, launchagent, shortcuts
 from . import help as manual
 from .avatars import BAR_SIZE, SIZE as AVATAR_SIZE, Avatars
 from .config import CONFIG_PATH, Config
-from .engine import build_items, now, summarize, summarize_closed
+from .engine import build_items, now, summarize, summarize_closed, unread_resolved
 from .formatting import ago, countdown, join, since, spell, truncate
 from .github import KEYCHAIN_SERVICE, GitHub, GitHubError, service_status, signature_of, store_token
 from .models import GROUPS, ORDER, Item, Kind, Person, Snapshot
@@ -1433,12 +1433,20 @@ class GitTodoApp(NSObject):
         """Ce que le menu montre, avec le suivi des clôturées déjà lues ramené à zéro.
 
         Au premier passage, tout l'historique est marqué ouvert : sinon un mois de clôtures
-        arriverait d'un coup comme autant de nouveautés.
+        arriverait d'un coup comme autant de nouveautés. Pas ce qui s'écrit dans les fils
+        résolus : c'est justement ce qu'on n'a pas vu passer.
         """
-        items = self.state.visible(self.snapshot.items)
-        # Seule l'histoire s'éteint au clic. Un message resté sans réponse sur une PR fermée
-        # attend toujours quelque chose de moi : il ne s'éteint qu'une fois répondu ou acquitté,
-        # comme sur une PR ouverte.
+        items = []
+        for item in self.state.visible(self.snapshot.items):
+            # Sur la PR d'autrui, une ligne de fils résolus ne compte que les messages pas encore
+            # ouverts, et s'en va quand il n'en reste plus. Sur la mienne, elle attend un acquittement.
+            if item.kind is Kind.RESOLVED_THREADS and item.messages:
+                item = unread_resolved(item, self.state.unread(item))
+            if item:
+                items.append(item)
+        # Seuls l'histoire et les fils résolus s'éteignent au clic. Un message resté sans
+        # réponse sur une PR fermée attend toujours quelque chose de moi : il ne s'éteint
+        # qu'une fois répondu ou acquitté, comme sur une PR ouverte.
         histoire = [item for item in items if item.kind is Kind.RECENTLY_CLOSED]
         if histoire and not self.state.knows_closed():
             self.state.mark_opened(histoire)
@@ -1477,7 +1485,7 @@ class GitTodoApp(NSObject):
         who = f" (vu en tant que @{self.snapshot.identity})" if self.snapshot.impersonating else ""
         tip = f"GitTodo — {count} chose(s) à faire{who}" if count else f"GitTodo — rien à faire{who}"
         if suivi:
-            tip += f", {suivi} sur des PR clôturées"
+            tip += f", {suivi} en violet (PR clôturées, fils résolus)"
         if self.snapshot.error:
             # L'erreur n'encombre pas la pastille : elle est dans le survol et dans le menu.
             tip = f"GitTodo — {truncate(self.snapshot.error, 80)}"
@@ -2085,10 +2093,12 @@ class GitTodoApp(NSObject):
         if item := self.row_of(sender):
             NSWorkspace.sharedWorkspace().openURL_(NSURL.URLWithString_(item.url))
             self.state.mark_seen([item])
+            # L'histoire et les fils résolus se comptent jusqu'au clic, et pas jusqu'à un coup
+            # d'oeil au menu : c'est l'ouverture qui vaut lecture.
             if item.kind is Kind.RECENTLY_CLOSED:
-                # L'histoire se compte jusqu'au clic, et pas jusqu'à un coup d'oeil au menu :
-                # c'est l'ouverture qui vaut lecture.
                 self.state.mark_opened([item])
+            elif item.kind is Kind.RESOLVED_THREADS and item.messages:
+                self.state.mark_read(item)
             self.render()
 
     def dismissItem_(self, sender):

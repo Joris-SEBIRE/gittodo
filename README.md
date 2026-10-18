@@ -124,9 +124,10 @@ pour elle.
   « poussée par ». Tes propres PR disent « créée par @toi », comme les autres. Aucune ligne ne
   reste sans visage.
 - Trois sortes de pastilles, et seulement trois. Chiffrée : elle prend la couleur de la ligne,
-  rouge pour ce qu'il reste à faire, violet pour le suivi des PR clôturées, grise sur une ligne
-  informative — le nombre dit alors combien, pas quoi faire. État de fin de PR : la couleur de
-  GitHub, violet `mergée` ou rouge `fermée`, sans nombre. Drapeau d'état : gris, sans nombre.
+  rouge pour ce qu'il reste à faire, violet pour le suivi des PR clôturées et des fils résolus,
+  grise sur une ligne informative — le nombre dit alors combien, pas quoi faire. État de fin de
+  PR : la couleur de GitHub, violet `mergée` ou rouge `fermée`, sans nombre. Drapeau d'état :
+  gris, sans nombre.
 - Le délai « depuis X » prend la couleur de la pastille de la ligne, et reste gris quand la ligne
   ne compte rien.
 - Le bouclier, devant le nom de la branche, marque une review obligatoire encore en attente :
@@ -135,7 +136,9 @@ pour elle.
 - Une PR ne paraît qu'une fois, dans sa catégorie la plus forte — celle qui vient le plus haut
   dans le menu. Une PR en conflit dont un message attend ta réponse est *une* PR à traiter, pas
   deux : elle se lit dans « On attend ma réponse », et son étiquette rouge « conflit » l'y suit.
-  Sans cette règle, elle compterait deux fois dans la pastille pour un seul geste.
+  Sans cette règle, elle compterait deux fois dans la pastille pour un seul geste. Seule
+  exception, « Écrit dans des fils résolus » : sa ligne disparaît une fois lue, et la PR garde la
+  sienne ailleurs pour ne pas partir avec elle.
 - Dans un titre de section, un compte suivi d'un `+` est un plancher : la liste est écrêtée, ou
   une recherche a buté sur sa limite. Sans `+`, le compte est exact, même s'il tombe pile sur le
   plafond. La pastille de la barre, elle, ne porte jamais de `+` : elle donne le nombre, et c'est
@@ -146,9 +149,11 @@ pour elle.
   la ligne « N de plus, non affichés ». L'ordre des autres ne bouge pas.
 - Un anneau se remplit autour de la photo, dans le sens horaire, jusqu'au prochain cycle : le
   délai avant la prochaine lecture se voit sans ouvrir le menu.
-- Une pastille violette en bas à gauche de la photo suit les PR sorties du périmètre ouvert :
-  messages restés sans réponse dessus, et clôtures faites par quelqu'un d'autre. Elle décompte
-  quand tu ouvres la ligne. La pastille rouge, en haut à droite, ne concerne que les PR ouvertes.
+- Une pastille violette en bas à gauche de la photo suit ce que GitHub tient pour clos : les PR
+  sorties du périmètre ouvert — messages restés sans réponse dessus, et clôtures faites par
+  quelqu'un d'autre — et les messages non acquittés des fils résolus. Les clôtures, et les fils
+  résolus des PR d'autrui, décomptent quand tu ouvres la ligne. La pastille rouge, en haut à
+  droite, ne concerne que les PR ouvertes et les fils encore ouverts.
 - Une clôture ne compte que tant qu'elle est joignable : au-delà de *Clôtures qui comptent*
   (sept jours par défaut), ou repoussée hors des lignes affichées par des clôtures plus récentes,
   elle reste dans l'histoire sans peser. Sans cette borne, un compte qu'aucune ligne visible ne
@@ -156,11 +161,21 @@ pour elle.
 - Un message resté sans réponse, lui, ne s'éteint pas avec le temps : une PR clôturée suit
   exactement les mêmes règles qu'une PR ouverte, la date du merge n'entrant pas en jeu. Une
   demande posée juste avant la clôture attend autant qu'une autre — c'est même celle qu'on manque.
-  Les gestes qui l'acquittent dépendent de l'endroit : sur un fil de code, répondre, réagir d'un
-  emoji ou résoudre le fil ; dans la discussion générale, où il n'y a aucun fil à résoudre, réagir
-  ou répondre **en citant** le message. Reprendre la parole sans citer n'acquitte rien : une liste
+  Les gestes qui l'acquittent dépendent de l'endroit : sur un fil de code, répondre ou réagir d'un
+  emoji ; dans la discussion générale, où il n'y a aucun fil à résoudre, réagir ou répondre **en
+  citant** le message. Reprendre la parole sans citer n'acquitte rien : une liste
   plate ne dit pas à quoi on répond. Seuls 👍 et 👎 comptent par défaut (`acknowledge_reactions`) :
   un 👀 dit qu'on a vu, pas qu'on a tranché.
+- Résoudre un fil le sort du rouge sans rien acquitter : GitHub ne date pas la résolution, donc
+  rien ne dit qu'un message l'a précédée. Les messages d'autrui que rien n'acquitte depuis ta
+  dernière intervention — tout le fil si tu n'y as jamais parlé — comptent en violet, dans
+  « Écrit dans des fils résolus » : GitHub replie ces fils, un par un, et c'est là qu'un message
+  passe inaperçu. Ce qui les éteint dépend de la PR. Sur celle d'un autre, les ouvrir suffit :
+  l'auteur qui répond et résout a clos le point, ce n'est pas une question qui t'attend. Chaque
+  clic ouvre le plus ancien pas encore ouvert et n'éteint que lui. Sur la tienne, il peut s'agir
+  de quelque chose à traiter : seuls une réponse ou une réaction les éteignent, comme un message
+  sur une PR clôturée. Réagir 👍 avant de résoudre t'évite l'un comme l'autre. Ce que tu as écrit
+  en dernier dans un fil résolu, en revanche, n'attend plus personne.
 - Un commentaire de review laissé en brouillon ne compte pas comme une réponse : tant que la revue
   n'est pas soumise, GitHub ne le montre qu'à toi. Le prendre pour de la parole ferait taire un
   fil où l'autre attend toujours.
@@ -174,11 +189,11 @@ Une seule instance tourne à la fois, garantie par un verrou sur
 
 GitTodo est violet, [LinearTodo](https://github.com/Joris-SEBIRE/lineartodo) est bleu. La couleur porte l'anneau du prochain
 cycle, le compteur animé qui le remplace pendant une lecture, les titres de section — icône et
-texte — et les titres de la fenêtre de réglages. Le suivi des PR clôturées, lui, prend le violet
-dont GitHub colore un merge : compte secondaire, nombres de la ligne et état de la PR dans la
-même teinte. Le rouge dit l'urgence, sauf sur une PR fermée sans merge, où il dit la fin de la PR
-comme GitHub le fait. La section des pannes garde la couleur de son niveau : là, l'alerte passe
-devant l'identité.
+texte — et les titres de la fenêtre de réglages. Le suivi des PR clôturées et des fils résolus,
+lui, prend le violet dont GitHub colore un merge : compte secondaire, nombres de la ligne et état
+de la PR dans la même teinte. Le rouge dit l'urgence, sauf sur une PR fermée sans merge, où il dit
+la fin de la PR comme GitHub le fait. La section des pannes garde la couleur de son niveau : là,
+l'alerte passe devant l'identité.
 
 ## Réglages
 
@@ -195,7 +210,7 @@ dessous — ce qu'on s'apprête à remplacer. Enregistrée, un trait vert passe 
 coche reste à sa place, jusqu'à la modification suivante. Le second bouton, à gauche, revient à la
 valeur d'origine. À l'ouverture, la fenêtre montre le fichier, jamais un brouillon abandonné.
 
-Le mode d'emploi de la fenêtre va plus loin que ce README : les vingt sections du menu une
+Le mode d'emploi de la fenêtre va plus loin que ce README : les vingt et une sections du menu une
 par une, les règles de comptage et d'anti-doublon, le coût en quota de chaque requête, et les
 valeurs réelles de ton installation.
 

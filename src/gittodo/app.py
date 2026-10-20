@@ -1211,7 +1211,7 @@ class GitTodoApp(NSObject):
                 self.clear_incident("code_owners")
             except GitHubError as exc:
                 self.note_incident("code_owners", exc)
-            signature = signature_of({pr.id: pr.updated_at for pr in prs})
+            signature = signature_of({pr.id: pr.updated_at for pr in prs if pr.id in self.client.head})
             identity = self.cfg.view_as or viewer
             if not self.people:
                 self.people = self.known_people(prs, viewer)

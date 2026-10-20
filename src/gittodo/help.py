@@ -91,7 +91,12 @@ rien n'est écrit dans le fichier de réglages.
 ## Sources
 
 - PR : six recherches `is:open is:pr` dans une seule requête GraphQL, sur `author:`, \
-`user-review-requested:`, `commenter:`, `reviewed-by:`, `assignee:` et `mentions:`. Chaque PR remonte ses \
+`user-review-requested:`, `commenter:`, `reviewed-by:`, `assignee:` et `mentions:`, de \
+`max_per_search` PR chacune. Une recherche qui déborde est lue au-delà dans une requête \
+d'appoint, trente PR au plus toutes recherches confondues, les tiennes d'abord : elle ne coûte \
+que les PR manquantes — deux points pour trois, vingt au pire — et rien quand aucune ne déborde. \
+Triées par mise à jour, ce sont les PR en sommeil, un vieux draft par exemple, qui sortaient \
+sinon du menu. Chaque PR remonte ses \
 `reviewThreads` avec `isResolved`, ses `comments`, ses `reactionGroups`, ses `reviews`, plus \
 `mergeable`, `statusCheckRollup`, `reviewRequests`, `headRefName` et `baseRefName`. Les revues \
 sont lues loin — cinquante, et c'est gratuit : chaque commentaire en ligne en crée une, et une \
@@ -126,8 +131,9 @@ de leurs PR, `Ref.compare` l'écart à la branche par défaut
 
 `rateLimit` accorde 5 000 points par heure. La requête complète des PR en coûte une quarantaine.
 
-- toutes les 20 s (`refresh_seconds`), une sonde à 1 point lit `id` et `updatedAt` des mêmes PR. \
-Empreinte identique, le cycle s'arrête là
+- toutes les 20 s (`refresh_seconds`), une sonde à 1 point lit `id` et `updatedAt` de la \
+première page des mêmes recherches. Empreinte identique, le cycle s'arrête là. Une PR plus loin \
+qui bouge remonte d'elle-même en tête, et la requête complète forcée relit le reste
 - empreinte différente : requête complète
 - toutes les 60 s au plus tard (`full_refresh_seconds`), requête complète forcée. Une réaction \
 et un `isResolved` ne changent pas `updatedAt`, la sonde ne peut pas les voir
@@ -231,7 +237,7 @@ décomposition
 - le titre d'une section qui regarde une fenêtre de temps la porte, écrite comme les délais des \
 lignes : deux plus grandes unités consécutives, donc « 1 mois » pour trente jours réglés
 - dans un titre de section, un compte suivi d'un `+` est un plancher, pas un total : la liste est \
-écrêtée, ou une recherche a buté sur `max_per_search`. Sans `+`, le compte est exact, y compris \
+écrêtée. Sans `+`, le compte est exact, y compris \
 quand il tombe pile sur le plafond. La pastille de la barre ne porte jamais de `+` : à sa taille \
 il ne se lirait pas, et il resterait allumé en permanence dès que la boîte des non-lues est \
 écrêtée. C'est le menu qui nomme la source écrêtée, en bas

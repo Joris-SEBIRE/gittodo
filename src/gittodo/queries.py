@@ -40,13 +40,16 @@ query($mine:String!,$toReview:String!,$commented:String!,$reviewed:String!,$assi
       $mentioned:String!,$n:Int!) {
   rateLimit { cost remaining resetAt }
   viewer { login avatarUrl(size: 64) }
-  mine: search(query:$mine, type:ISSUE, first:$n) { issueCount nodes { ...PR } }
-  toReview: search(query:$toReview, type:ISSUE, first:$n) { issueCount nodes { ...PR } }
-  commented: search(query:$commented, type:ISSUE, first:$n) { issueCount nodes { ...PR } }
-  reviewed: search(query:$reviewed, type:ISSUE, first:$n) { issueCount nodes { ...PR } }
-  assigned: search(query:$assigned, type:ISSUE, first:$n) { issueCount nodes { ...PR } }
-  mentioned: search(query:$mentioned, type:ISSUE, first:$n) { issueCount nodes { ...PR } }
+  mine: search(query:$mine, type:ISSUE, first:$n) { issueCount pageInfo { endCursor } nodes { ...PR } }
+  toReview: search(query:$toReview, type:ISSUE, first:$n) { issueCount pageInfo { endCursor } nodes { ...PR } }
+  commented: search(query:$commented, type:ISSUE, first:$n) { issueCount pageInfo { endCursor } nodes { ...PR } }
+  reviewed: search(query:$reviewed, type:ISSUE, first:$n) { issueCount pageInfo { endCursor } nodes { ...PR } }
+  assigned: search(query:$assigned, type:ISSUE, first:$n) { issueCount pageInfo { endCursor } nodes { ...PR } }
+  mentioned: search(query:$mentioned, type:ISSUE, first:$n) { issueCount pageInfo { endCursor } nodes { ...PR } }
 }
+"""
+
+PR_FRAGMENT = """
 fragment PR on PullRequest {
   id number title url isDraft createdAt updatedAt
   headRefName baseRefName
@@ -68,6 +71,23 @@ fragment PR on PullRequest {
     reactionGroups { content viewerHasReacted } } }
 }
 """
+PR_QUERY += PR_FRAGMENT
+
+# PR lues au plus par la requête d'appoint, toutes recherches confondues, dans l'ordre de
+# SEARCHES : mes PR d'abord. Une PR coûte ~0,65 point, mesuré : la suite ne coûte que les PR
+# manquantes, rien quand aucune recherche ne déborde, et vingt points au pire.
+OVERFLOW_BUDGET = 30
+
+
+def more_query(sources: list[str]) -> str:
+    """Suite des recherches qui ont débordé, une page chacune, à partir de leur curseur."""
+    params = ",".join(f"${s}:String!,${s}_after:String!,${s}_n:Int!" for s in sources)
+    blocks = "\n".join(
+        f"  {s}: search(query:${s}, type:ISSUE, first:${s}_n, after:${s}_after) {{ nodes {{ ...PR }} }}"
+        for s in sources
+    )
+    return f"query({params}) {{\n  rateLimit {{ remaining }}\n{blocks}\n}}\n{PR_FRAGMENT}"
+
 
 PEOPLE_QUERY = """
 query($org:String!, $recent:String!) {

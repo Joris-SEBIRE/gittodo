@@ -50,10 +50,11 @@ class Config:
     # Une réaction ou la résolution d'un fil ne modifient pas la date de la PR : la sonde
     # légère ne peut pas les voir. D'où une requête complète forcée à cet intervalle.
     full_refresh_seconds: int = 60
-    # Chaque PR lue coûte du quota GraphQL : mesuré à 47 points par requête complète avec 12
-    # par recherche, soit ~2940 points/heure au rythme par défaut, sous le plafond de 5000.
-    # C'est la requête complète forcée qui domine, pas la sonde. Monter l'un impose de baisser
-    # l'autre.
+    # Première page de chaque recherche. Chaque PR lue coûte du quota GraphQL : mesuré à 47
+    # points par requête complète avec 12 par recherche, soit ~2940 points/heure au rythme par
+    # défaut, sous le plafond de 5000. C'est la requête complète forcée qui domine, pas la sonde.
+    # Monter l'un impose de baisser l'autre. Une recherche qui déborde n'y perd rien : sa suite
+    # est lue à part, au prix des seules PR manquantes, dans la limite de OVERFLOW_BUDGET.
     max_per_search: int = 12
     # Auteurs dont les commentaires ne déclenchent jamais un « à répondre ».
     ignored_authors: list[str] = field(default_factory=lambda: list(DEFAULT_IGNORED))

@@ -54,7 +54,7 @@ FORM: tuple[tuple[str, tuple[tuple[str, str, str, str], ...]], ...] = (
         (
             ("refresh_seconds", "Cycle", "intervalle du cycle, sonde comprise", ""),
             ("full_refresh_seconds", "Requête complète", "délai maximum entre deux requêtes complètes", ""),
-            ("max_per_search", "PR par recherche", "chaque PR lue coûte du quota", ""),
+            ("max_per_search", "PR par recherche", "première page ; la suite est lue à part, au prix des PR manquantes", ""),
             ("branch_refresh_seconds", "Balayage des branches", "il dure une vingtaine de secondes", ""),
             ("mention_refresh_seconds", "Boîte des non-lues", "jusqu'à dix appels REST pour la parcourir", ""),
             ("closed_refresh_seconds", "Suivi des clôturées", "deux recherches, mesurées à 3 points", ""),

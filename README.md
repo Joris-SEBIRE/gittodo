@@ -139,9 +139,8 @@ pour elle.
   Sans cette règle, elle compterait deux fois dans la pastille pour un seul geste. Seule
   exception, « Écrit dans des fils résolus » : sa ligne disparaît une fois lue, et la PR garde la
   sienne ailleurs pour ne pas partir avec elle.
-- Dans un titre de section, un compte suivi d'un `+` est un plancher : la liste est écrêtée, ou
-  une recherche a buté sur sa limite. Sans `+`, le compte est exact, même s'il tombe pile sur le
-  plafond. La pastille de la barre, elle, ne porte jamais de `+` : elle donne le nombre, et c'est
+- Dans un titre de section, un compte suivi d'un `+` est un plancher : la liste est écrêtée.
+  Sans `+`, le compte est exact, même s'il tombe pile sur le plafond. La pastille de la barre, elle, ne porte jamais de `+` : elle donne le nombre, et c'est
   le menu qui nomme ce qui a été écrêté.
 - Une ligne qui compte n'est jamais escamotée par l'écrêtage. Une section d'action n'est donc pas
   écrêtée du tout, puisque chacune de ses lignes compte. Seules les sections informatives sont

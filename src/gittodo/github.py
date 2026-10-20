@@ -23,8 +23,10 @@ from .queries import (
     PEOPLE_QUERY,
     PR_QUERY,
     RECENT_ACTIVITY,
+    OVERFLOW_BUDGET,
     SEARCHES,
     SENTINEL_QUERY,
+    more_query,
 )
 
 API = "https://api.github.com"
@@ -133,6 +135,10 @@ class GitHub:
         # Photo du compte du token, lue avec les PR : la barre en a besoin, et elle ne doit
         # dépendre ni d'un annuaire d'organisation ni d'une PR déjà croisée.
         self.viewer_face = ""
+        # PR des premières pages, les seules que lit la sonde : l'empreinte d'une requête
+        # complète se calcule sur elles, sinon les deux ne coïncideraient plus dès qu'une
+        # recherche déborde, et chaque cycle paierait la requête complète.
+        self.head: set[str] = set()
         # Membres annoncés par l'organisation contre membres réellement lus : GitHub n'en sert
         # pas plus de cent par page, et une liste tronquée en silence ferait croire que le
         # collègue qu'on cherche n'existe pas.
@@ -226,7 +232,11 @@ class GitHub:
         return variables
 
     def fetch_signature(self) -> tuple[str, int | None]:
-        """Empreinte de l'état côté GitHub, pour 1 point de quota au lieu de ~80."""
+        """Empreinte de l'état côté GitHub, pour 1 point de quota au lieu de ~80.
+
+        La première page suffit, même quand une recherche déborde : triées par mise à jour, les
+        PR qui bougent y remontent d'elles-mêmes, et la requête complète forcée relit le reste.
+        """
         data = self.graphql(SENTINEL_QUERY, self._search_variables())
         # Même normalisation que côté requête complète, sinon les empreintes ne
         # coïncideraient jamais (« …Z » contre « +00:00 »).
@@ -241,18 +251,45 @@ class GitHub:
     def fetch_pull_requests(self) -> tuple[list[PullRequest], str, int | None, list[str]]:
         variables = self._search_variables()
         data = self.graphql(PR_QUERY, variables)
+        rate = (data.get("rateLimit") or {}).get("remaining")
         prs: dict[str, PullRequest] = {}
-        truncated: list[str] = []
-        for source in SEARCHES:
-            block = data.get(source) or {}
+        # Des identifiants et non un compte : une PR qui bouge entre les deux requêtes peut être
+        # relue par l'appoint, et la compter deux fois masquerait celle qu'il a sautée.
+        read: dict[str, set[str]] = {}
+
+        def take(source: str, block: dict) -> None:
             nodes = [n for n in (block.get("nodes") or []) if n]
-            if (block.get("issueCount") or 0) > len(nodes):
-                truncated.append(f"{source} ({block['issueCount']} résultats, {len(nodes)} lus)")
+            read.setdefault(source, set()).update(node["id"] for node in nodes)
             for node in nodes:
-                existing = prs.get(node["id"])
-                pr = existing or _parse_pr(node)
+                pr = prs.get(node["id"]) or _parse_pr(node)
                 pr.sources.add(source)
                 prs[pr.id] = pr
+
+        for source in SEARCHES:
+            take(source, data.get(source) or {})
+        self.head = set().union(*read.values())
+        # Une recherche qui déborde perd ses PR les moins récemment actives : un draft en sommeil
+        # sortait du menu dès qu'on ouvrait d'autres PR. Sa suite est lue à part, au prix des
+        # seules PR manquantes, plutôt qu'en relevant `max_per_search` pour les six recherches.
+        rest: dict = {}
+        budget = OVERFLOW_BUDGET
+        for source in SEARCHES:
+            block = data.get(source) or {}
+            missing = min((block.get("issueCount") or 0) - len(read[source]), budget)
+            if missing > 0 and (cursor := (block.get("pageInfo") or {}).get("endCursor")):
+                rest.update({source: variables[source], f"{source}_after": cursor, f"{source}_n": missing})
+                budget -= missing
+        if rest:
+            sources = [source for source in SEARCHES if source in rest]
+            extra = self.graphql(more_query(sources), rest)
+            rate = (extra.get("rateLimit") or {}).get("remaining")
+            for source in sources:
+                take(source, extra.get(source) or {})
+        truncated = [
+            f"{source} ({count} résultats, {len(read[source])} lus)"
+            for source in SEARCHES
+            if (count := (data.get(source) or {}).get("issueCount") or 0) > len(read[source])
+        ]
         # Un avis rendu hors de la fenêtre de revues lue est un avis perdu : « approuvée » et
         # « à corriger » se déduisent du dernier verdict de chacun, et sur une PR très commentée
         # chaque commentaire en ligne crée une revue qui pousse les plus anciennes dehors. Une
@@ -261,7 +298,6 @@ class GitHub:
         deep = [pr.slug for pr in prs.values() if pr.reviews_count > len(pr.reviews)]
         if deep:
             truncated.append(f"revues non lues sur {', '.join(sorted(deep)[:3])}")
-        rate = (data.get("rateLimit") or {}).get("remaining")
         self.viewer_face = (data.get("viewer") or {}).get("avatarUrl") or ""
         return list(prs.values()), data["viewer"]["login"], rate, truncated
 

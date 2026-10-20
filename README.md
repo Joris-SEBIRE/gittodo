@@ -133,6 +133,9 @@ pour elle.
 - Le bouclier, devant le nom de la branche, marque une review obligatoire encore en attente :
   CODEOWNERS l'a demandée, elle ne peut pas être contournée. Il tient cette ligne parce que la
   protection porte sur la branche visée. L'infobulle dit de qui la review est attendue.
+- Après un merge sur sa branche cible, GitHub recalcule si une PR est en conflit et ne répond rien
+  le temps du calcul. La PR garde alors son dernier état connu jusqu'au verdict : sans cela, « Mes
+  PR en conflit » et « Mes PR à merger » clignotaient à chaque merge sur main.
 - Une PR ne paraît qu'une fois, dans sa catégorie la plus forte — celle qui vient le plus haut
   dans le menu. Une PR en conflit dont un message attend ta réponse est *une* PR à traiter, pas
   deux : elle se lit dans « On attend ma réponse », et son étiquette rouge « conflit » l'y suit.

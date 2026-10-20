@@ -139,6 +139,8 @@ class GitHub:
         # complète se calcule sur elles, sinon les deux ne coïncideraient plus dès qu'une
         # recherche déborde, et chaque cycle paierait la requête complète.
         self.head: set[str] = set()
+        # Dernier état de fusion connu par PR, conflit ou non : de quoi traverser un `UNKNOWN`.
+        self.mergeable: dict[str, str] = {}
         # Membres annoncés par l'organisation contre membres réellement lus : GitHub n'en sert
         # pas plus de cent par page, et une liste tronquée en silence ferait croire que le
         # collègue qu'on cherche n'existe pas.
@@ -285,6 +287,13 @@ class GitHub:
             rate = (extra.get("rateLimit") or {}).get("remaining")
             for source in sources:
                 take(source, extra.get(source) or {})
+        # Après un merge sur sa branche cible, GitHub recalcule la fusionnabilité de chaque PR et
+        # répond `UNKNOWN` le temps du calcul : sans mémoire, « Mes PR en conflit » s'éteignait
+        # puis revenait à chaque merge sur main. Le dernier état connu tient jusqu'au verdict.
+        for pr in prs.values():
+            if pr.mergeable == "UNKNOWN":
+                pr.mergeable = self.mergeable.get(pr.id, pr.mergeable)
+        self.mergeable = {pr.id: pr.mergeable for pr in prs.values() if pr.mergeable in ("CONFLICTING", "MERGEABLE")}
         truncated = [
             f"{source} ({count} résultats, {len(read[source])} lus)"
             for source in SEARCHES

@@ -222,6 +222,9 @@ Pas 👀, qui dit qu'on a vu et non qu'on a tranché
 - un commentaire de review resté en brouillon n'est pas de la parole : tant que la revue n'est \
 pas soumise, GitHub ne le montre qu'à son auteur. Le compter ferait taire un fil où quelqu'un \
 attend toujours ma réponse, alors que personne n'a rien reçu
+- après un merge sur la branche visée, GitHub recalcule `mergeable` et répond `UNKNOWN` le temps \
+du calcul : la PR garde son dernier état connu, en conflit ou non, jusqu'au verdict. Sans cela, \
+« Mes PR en conflit » et « Mes PR à merger » clignotaient à chaque merge sur la branche cible
 - une PR ne paraît qu'une fois, dans sa catégorie la plus forte, celle qui vient le plus haut \
 dans le menu. Une PR en conflit dont un message attend ta réponse est une PR, pas deux choses à \
 faire : elle se lit dans « On attend ma réponse », et son étiquette rouge « conflit » l'y suit. \

@@ -19,8 +19,8 @@ SEARCHES = {
     "mentioned": "is:open is:pr mentions:{who} -author:{who} archived:false sort:updated-desc",
 }
 
-# Sonde légère (1 point de quota) : sert à savoir s'il vaut la peine de payer PR_QUERY,
-# qui coûte ~80 points. C'est ce qui rend un rythme de quelques secondes soutenable.
+# Sonde légère (1 point de quota) : sert à savoir s'il vaut la peine de payer les recherches
+# complètes, qui coûtent ~50 points. C'est ce qui rend un rythme de quelques secondes soutenable.
 SENTINEL_QUERY = """
 query($mine:String!,$toReview:String!,$commented:String!,$reviewed:String!,$assigned:String!,
       $mentioned:String!,$n:Int!) {
@@ -35,17 +35,14 @@ query($mine:String!,$toReview:String!,$commented:String!,$reviewed:String!,$assi
 fragment Stamp on PullRequest { id updatedAt }
 """
 
-PR_QUERY = """
-query($mine:String!,$toReview:String!,$commented:String!,$reviewed:String!,$assigned:String!,
-      $mentioned:String!,$n:Int!) {
+# Une requête par recherche, lancées en parallèle. Groupées, les six se suivaient côté GitHub :
+# un jour où sa recherche répond en deux secondes, le total passait les dix secondes au-delà
+# desquelles GitHub coupe une requête GraphQL (502, 504), alors que la page d'état restait verte.
+SEARCH_QUERY = """
+query($q:String!,$n:Int!) {
   rateLimit { cost remaining resetAt }
   viewer { login avatarUrl(size: 64) }
-  mine: search(query:$mine, type:ISSUE, first:$n) { issueCount pageInfo { endCursor } nodes { ...PR } }
-  toReview: search(query:$toReview, type:ISSUE, first:$n) { issueCount pageInfo { endCursor } nodes { ...PR } }
-  commented: search(query:$commented, type:ISSUE, first:$n) { issueCount pageInfo { endCursor } nodes { ...PR } }
-  reviewed: search(query:$reviewed, type:ISSUE, first:$n) { issueCount pageInfo { endCursor } nodes { ...PR } }
-  assigned: search(query:$assigned, type:ISSUE, first:$n) { issueCount pageInfo { endCursor } nodes { ...PR } }
-  mentioned: search(query:$mentioned, type:ISSUE, first:$n) { issueCount pageInfo { endCursor } nodes { ...PR } }
+  search(query:$q, type:ISSUE, first:$n) { issueCount pageInfo { endCursor } nodes { ...PR } }
 }
 """
 
@@ -71,7 +68,16 @@ fragment PR on PullRequest {
     reactionGroups { content viewerHasReacted } } }
 }
 """
-PR_QUERY += PR_FRAGMENT
+SEARCH_QUERY += PR_FRAGMENT
+
+# Une PR relue sans passer par la recherche, quand celle-ci l'a perdue : son état dit si elle est
+# vraiment sortie (fermée, mergée) ou seulement absente d'une liste partielle.
+NODES_QUERY = """
+query($ids:[ID!]!) {
+  rateLimit { remaining }
+  nodes(ids:$ids) { ... on PullRequest { state ...PR } }
+}
+""" + PR_FRAGMENT
 
 # PR lues au plus par la requête d'appoint, toutes recherches confondues, dans l'ordre de
 # SEARCHES : mes PR d'abord. Une PR coûte ~0,65 point, mesuré : la suite ne coûte que les PR
@@ -122,18 +128,20 @@ CLOSED_SEARCHES = {
 # `mergedBy` donne l'auteur d'un merge ; une fermeture sans merge n'a pas d'équivalent, son
 # acteur ne s'obtient que par la timeline.
 #
-# La profondeur des messages est celle de `PR_QUERY` parce qu'elle est gratuite, et c'est elle
+# La profondeur des messages est celle de `SEARCH_QUERY` parce qu'elle est gratuite, et c'est elle
 # qui compte : la discussion générale s'acquitte par citation, et une citation qu'on n'a pas lue
 # transforme un point réglé en demande éternelle. `reviewThreads`, lui, coûte deux points par fil
 # et par recherche, et le mesurer a montré qu'aller au-delà de quinze ne trouvait rien de plus :
 # le quota vaut mieux ailleurs. Ce sont les fils les plus récents qui sont lus, parce qu'une
 # demande en attente se trouve là et non dans les premiers échanges, et ce qui reste non lu est
 # annoncé en bas du menu.
+#
+# Une requête par recherche, comme pour les PR ouvertes : groupées, les deux passaient 8,5 s un
+# jour de lenteur, à un souffle des dix secondes au-delà desquelles GitHub coupe.
 CLOSED_QUERY = """
-query($mine:String!,$involved:String!,$mine_n:Int!,$involved_n:Int!) {
+query($q:String!,$n:Int!) {
   rateLimit { cost remaining }
-  mine: search(query:$mine, type:ISSUE, first:$mine_n) { issueCount nodes { ...Fin } }
-  involved: search(query:$involved, type:ISSUE, first:$involved_n) { issueCount nodes { ...Fin } }
+  search(query:$q, type:ISSUE, first:$n) { issueCount nodes { ...Fin } }
 }
 fragment Fin on PullRequest {
   id number title url state merged mergedAt closedAt updatedAt

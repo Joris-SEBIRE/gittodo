@@ -92,12 +92,26 @@ class State:
         # en restant dans la liste pour y revenir. Pour une ligne de fils résolus, la valeur est
         # la liste des messages ouverts, séparés par une espace.
         self.opened: dict[str, str] = dict(raw.get("opened") or {})
+        # PR de la dernière lecture et leurs sources, avec le compte et les recherches qui les ont
+        # données : au démarrage, la première lecture se vérifie comme les suivantes, sans quoi une
+        # liste partielle de GitHub vide le menu, puis le fait sonner en se remplissant.
+        self.known: dict[str, list[str]] = dict(raw.get("known") or {})
+        self.known_for: list = list(raw.get("known_for") or [])
         self.scope = ""
 
     def save(self) -> None:
         _write_atomic(
             STATE_PATH,
-            json.dumps({"dismissed": self.dismissed, "seen": self.seen, "opened": self.opened}, indent=1),
+            json.dumps(
+                {
+                    "dismissed": self.dismissed,
+                    "seen": self.seen,
+                    "opened": self.opened,
+                    "known": self.known,
+                    "known_for": self.known_for,
+                },
+                indent=1,
+            ),
         )
 
     def key(self, item: Item) -> str:

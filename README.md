@@ -262,8 +262,9 @@ recopie pas un `config.json` venu d'ailleurs sans avoir lu ces deux champs.
   dit que ces nombres datent. Le menu
   ouvre alors une section qui nomme la source, l'erreur, depuis quand, et ce que cela fausse.
   Trois niveaux : jaune quand rien n'est cassé chez GitHub mais que l'app ne peut plus tout lire,
-  orange quand une source auxiliaire échoue, rouge quand la requête principale échoue ou que
-  GitHub annonce un incident majeur.
+  orange quand une source échoue alors que l'API répond encore à une requête minimale — GitHub
+  est lent, ou coupe une requête —, rouge quand GitHub annonce un incident majeur ou que l'API ne
+  répond plus du tout.
 - `make print` reproduit le contenu du menu en texte, sans interface.
 - `PYTHONPATH=src .venv/bin/python -m gittodo --print --as <login>` montre ce que verrait un
   collègue.

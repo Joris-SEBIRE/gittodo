@@ -7,6 +7,7 @@ import sys
 import threading
 import traceback
 from dataclasses import replace
+from datetime import timedelta
 from pathlib import Path
 
 import objc
@@ -68,7 +69,7 @@ from .chimes import Bell
 from .config import CONFIG_PATH, Config
 from .engine import build_items, now, summarize, summarize_closed, unread_resolved
 from .formatting import ago, countdown, join, since, spell, truncate
-from .github import KEYCHAIN_SERVICE, GitHub, GitHubError, service_status, signature_of, store_token
+from .github import KEYCHAIN_SERVICE, GitHub, GitHubError, covered, service_status, signature_of, store_token
 from .models import GROUPS, ORDER, Item, Kind, Person, Snapshot
 from .state import State, acquire_single_instance, log_error, write_status
 
@@ -132,6 +133,7 @@ COUNT_OVERLAP = 8.0
 # lit quelqu'un qui voit le cône de chantier et se demande à quoi il ne peut pas se fier.
 SOURCES = {
     "pull_requests": ("PR et conversations", "tout est figé, rien n'est à jour"),
+    "api": ("API GitHub", "elle ne répond plus, même à une requête minimale"),
     "notifications": ("boîte des non-lues", "une mention peut manquer"),
     "mentions": ("sujets des mentions", "une mention fermée peut rester affichée"),
     "branches": ("branches distantes", "les branches peuvent être périmées"),
@@ -803,6 +805,9 @@ class GitTodoApp(NSObject):
         self.state = State()
         self.state.scope = self.cfg.view_as or ""
         self.client = GitHub(self.cfg)
+        self.client.known = {pr_id: frozenset(sources) for pr_id, sources in self.state.known.items()}
+        if self.state.known_for:
+            self.client.known_for = (self.state.known_for[0], *(tuple(pair) for pair in self.state.known_for[1:]))
         self.avatars = Avatars()
         self.people: tuple[Person, ...] = ()
         self.snapshot = Snapshot(items=[])
@@ -917,6 +922,16 @@ class GitTodoApp(NSObject):
             self.note_incident("closed", exc)
             return self.closures
         self.clear_incident("closed")
+        # Une clôture ne quitte la fenêtre qu'en vieillissant — fermée, ou sans activité, depuis
+        # plus de `closed_days` jours : absente d'une lecture qui la couvre encore, elle vient
+        # d'une liste partielle de la recherche, et on la garde.
+        since = now() - timedelta(days=max(1, self.cfg.closed_days))
+        read = {closure.pr.id for closure in found}
+        found = found + [
+            closure
+            for closure in self.closures
+            if closure.pr.id not in read and (closure.at >= since or closure.pr.updated_at >= since)
+        ]
         self.closures, self.closures_at, self.closures_limit = found, now(), limit
         return found
 
@@ -959,8 +974,10 @@ class GitTodoApp(NSObject):
         """Niveau de gravité : nos propres échecs croisés avec ce qu'annonce GitHub.
 
         Un quota épuisé ou un refus de droits ne sont pas des pannes de GitHub, quelle que soit
-        la source touchée : les données sont figées, mais rien n'est cassé en face. La panne de
-        la source principale, elle, arrête tout, et l'annonce officielle a le dernier mot.
+        la source touchée : les données sont figées, mais rien n'est cassé en face. « En panne »
+        ne se dit que sur l'annonce officielle d'un incident majeur, ou quand l'API ne répond plus
+        même à une requête minimale (`check_api`) : une requête qui échoue alors que celle-ci
+        passe vient d'une lenteur de GitHub, qui répond mal, pas d'une panne.
         """
         health = self.health if health is None else health
         if not health:
@@ -970,14 +987,29 @@ class GitTodoApp(NSObject):
         if all(trouble["kind"] == "réglage" for trouble in health.values()):
             return "réglage"
         official = OFFICIAL.get(self.service[0], "")
-        if official == "critique":
-            return "critique"
         broken = {name for name, t in health.items() if t["kind"] in ("panne", "réseau")}
-        if "pull_requests" in broken:
+        if official == "critique" or "api" in broken:
             return "critique"
         if broken or official == "alerte":
             return "alerte"
         return "attention"
+
+    @objc.python_method
+    def check_api(self, trouble) -> None:
+        """Après une erreur serveur, une requête minimale dit si l'API répond encore.
+
+        Elle répond : notre requête a été coupée par une lenteur de GitHub, qui répond mal. Elle
+        tombe aussi : l'API est en panne, même si la page d'état ne l'a pas encore annoncé.
+        """
+        if getattr(trouble, "kind", "") != "panne":
+            return
+        try:
+            self.client.graphql("query { viewer { login } }", {})
+        except GitHubError as exc:
+            if exc.kind == "panne":
+                self.note_incident("api", exc)
+                return
+        self.clear_incident("api")
 
     @objc.python_method
     def read_notifications(self, wanted: bool) -> list:
@@ -1138,8 +1170,12 @@ class GitTodoApp(NSObject):
         mtime = self.config_mtime()
         if mtime and mtime != self.cfg_mtime:
             avant = (self.cfg.closed_days, self.cfg.show_closed)
+            searches = self.client._search_variables()
             self.cfg = Config.load()
             self.client.cfg = self.cfg
+            if searches != self.client._search_variables():
+                # Autres recherches : ni la sonde ni les clôturées gardées ne valent plus.
+                self.signature, self.closures, self.closures_at = "", [], None
             self.state.scope = self.cfg.view_as or ""
             self.cfg_mtime = mtime
             # Un réglage change ce que le menu contient : ce qui apparaît n'est pas nouveau.
@@ -1204,9 +1240,11 @@ class GitTodoApp(NSObject):
             try:
                 signature, rate = self.client.fetch_signature()
             except GitHubError as exc:
-                self.land(self.apply_snapshot, self._failed(str(exc)))
+                snapshot = self._failed(str(exc), exc)
+                self.check_api(exc)
+                self.land(self.apply_snapshot, snapshot)
                 return
-            if signature == self.signature:
+            if covered(signature, self.signature):
                 self.land(self.touch_snapshot, rate)
                 return
         try:
@@ -1220,7 +1258,7 @@ class GitTodoApp(NSObject):
                 self.clear_incident("code_owners")
             except GitHubError as exc:
                 self.note_incident("code_owners", exc)
-            signature = signature_of({pr.id: pr.updated_at for pr in prs if pr.id in self.client.head})
+            signature = signature_of({pr.id: pr.updated_at for pr in prs})
             identity = self.cfg.view_as or viewer
             if not self.people:
                 self.people = self.known_people(prs, viewer)
@@ -1230,8 +1268,11 @@ class GitTodoApp(NSObject):
             if self.notifications_limit:
                 truncated = truncated + [self.notifications_limit]
             self.clear_incident("pull_requests")
+            self.clear_incident("api")
             self.ask_service()
-            closures = self.read_closures()
+            # Une PR rouverte est lue ouverte : sa clôture gardée en mémoire ne vaut plus.
+            opened = {pr.id for pr in prs}
+            closures = [closure for closure in self.read_closures() if closure.pr.id not in opened]
             truncated = truncated + self.closures_limit
             snapshot = Snapshot(
                 items=build_items(prs, notifications, identity, self.cfg, self.branches, closures),
@@ -1245,6 +1286,7 @@ class GitTodoApp(NSObject):
             )
         except GitHubError as exc:
             snapshot = self._failed(str(exc), exc)
+            self.check_api(exc)
             self.ask_service()
         except Exception as exc:  # une exception ne doit jamais tuer la boucle d'événements
             snapshot = self._failed(f"{type(exc).__name__}: {exc}")
@@ -1403,6 +1445,8 @@ class GitTodoApp(NSObject):
         self.snapshot = snapshot
         if not snapshot.error:
             self.state.prune(snapshot.items)
+            self.state.known = {pr_id: sorted(sources) for pr_id, sources in self.client.known.items()}
+            self.state.known_for = list(self.client.known_for)
             self.state.save()
             if self.bell.feed(self.visible(), snapshot.identity):
                 self.chime()
@@ -1432,6 +1476,7 @@ class GitTodoApp(NSObject):
         self.cfg_mtime = self.config_mtime()
         self.state.scope = login or ""
         self.signature = ""  # autre identité : la sonde ne peut pas servir de référence
+        self.closures, self.closures_at = [], None  # ni ses clôturées
         # Les branches appartiennent à une personne : garder celles de l'identité précédente
         # les afficherait sous le nom d'une autre. On reprend celles déjà connues pour cette
         # identité — la revalidation du prochain cycle corrigera ce qui a bougé — et on
@@ -1731,8 +1776,8 @@ class GitTodoApp(NSObject):
         """Barre d'accès rapide, épinglée en tête : les lignes du pied, en icônes et en abrégé.
 
         Mêmes icônes, même ordre, même vocabulaire : ce sont les lignes du bas, réduites à ce
-        qui tient sur une ligne. Elles se partagent la largeur du menu en parts égales, et le
-        libellé de chacune est coupé net à la part suivante.
+        qui tient sur une ligne. Chacune a la place de son libellé, et celle qu'un libellé court
+        laisse libre va aux autres ; un libellé trop long est coupé net à la part suivante.
 
         Posée en dernier, mais insérée en premier : c'est le seul moment où le menu connaît sa
         largeur, celle de sa ligne la plus large.

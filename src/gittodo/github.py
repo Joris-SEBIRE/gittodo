@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -20,16 +21,24 @@ from .queries import (
     CLOSED_QUERY,
     CLOSED_SEARCHES,
     DIRECT_REVIEW,
-    PEOPLE_QUERY,
-    PR_QUERY,
-    RECENT_ACTIVITY,
+    NODES_QUERY,
     OVERFLOW_BUDGET,
+    PEOPLE_QUERY,
+    RECENT_ACTIVITY,
+    SEARCH_QUERY,
     SEARCHES,
     SENTINEL_QUERY,
     more_query,
 )
 
 API = "https://api.github.com"
+# Essais par recherche : une relance quand GitHub coupe la requête ou rend une liste visiblement
+# incomplète. Au-delà, la lecture la plus complète l'emporte.
+SEARCH_ATTEMPTS = 3
+# Lectures manquées d'affilée au-delà desquelles une PR est tenue pour sortie d'une recherche qui
+# ne se vérifie pas sur elle (assignation, mention). Mesurée à une sur trois avant relance, une
+# liste partielle n'en fait pas manquer trois de suite après relances.
+VANISH_GRACE = 3
 EPOCH = datetime.fromtimestamp(0, tz=timezone.utc)
 # Boîte des non-lues : l'API plafonne à 50 par page quoi qu'on demande, et dix pages
 # couvrent les comptes très bruyants (mesuré : 424 non lues, la seule mention en page 6).
@@ -135,12 +144,14 @@ class GitHub:
         # Photo du compte du token, lue avec les PR : la barre en a besoin, et elle ne doit
         # dépendre ni d'un annuaire d'organisation ni d'une PR déjà croisée.
         self.viewer_face = ""
-        # PR des premières pages, les seules que lit la sonde : l'empreinte d'une requête
-        # complète se calcule sur elles, sinon les deux ne coïncideraient plus dès qu'une
-        # recherche déborde, et chaque cycle paierait la requête complète.
-        self.head: set[str] = set()
         # Dernier état de fusion connu par PR, conflit ou non : de quoi traverser un `UNKNOWN`.
         self.mergeable: dict[str, str] = {}
+        # PR de la dernière lecture et leurs sources, pour le même compte et les mêmes recherches :
+        # une source qu'une liste partielle perd se vérifie sur la PR. Puis, par PR et par source
+        # invérifiable, ses lectures manquées d'affilée.
+        self.known: dict[str, frozenset] = {}
+        self.known_for: tuple = ()
+        self.misses: dict[tuple[str, str], int] = {}
         # Membres annoncés par l'organisation contre membres réellement lus : GitHub n'en sert
         # pas plus de cent par page, et une liste tronquée en silence ferait croire que le
         # collègue qu'on cherche n'existe pas.
@@ -250,10 +261,39 @@ class GitHub:
         }
         return signature_of(stamps), (data.get("rateLimit") or {}).get("remaining")
 
+    def read_search(self, document: str, query: str, n: int) -> dict:
+        """Une recherche, relancée quand GitHub la coupe ou la rend visiblement incomplète.
+
+        Un jour de lenteur, la recherche de GitHub rend des listes partielles sans erreur — 9 fois
+        sur 25, jusqu'à aucun résultat sur dix — et coupe parfois la requête (502, 504). Quand le
+        compte annoncé trahit le manque, on relance, et la lecture la plus complète l'emporte.
+        Le compte peut aussi mentir : la relecture directe de `fetch_pull_requests` couvre le reste.
+        """
+        best: dict = {}
+        for attempt in range(SEARCH_ATTEMPTS):
+            try:
+                data = self.graphql(document, {"q": query, "n": n})
+            except GitHubError as exc:
+                if best or attempt + 1 < SEARCH_ATTEMPTS and exc.status in (502, 504):
+                    continue
+                raise
+            block = data.get("search") or {}
+            found = len([node for node in block.get("nodes") or [] if node])
+            if found >= len([node for node in (best.get("search") or {}).get("nodes") or [] if node]):
+                best = data
+            if found >= min(block.get("issueCount") or 0, n):
+                break
+        return best
+
     def fetch_pull_requests(self) -> tuple[list[PullRequest], str, int | None, list[str]]:
         variables = self._search_variables()
-        data = self.graphql(PR_QUERY, variables)
-        rate = (data.get("rateLimit") or {}).get("remaining")
+        self.token()  # résolu avant les fils, qui le liraient sinon chacun de leur côté
+        with ThreadPoolExecutor(max_workers=len(SEARCHES)) as pool:
+            answers = dict(zip(SEARCHES, pool.map(lambda source: self.read_search(SEARCH_QUERY, variables[source], variables["n"]), SEARCHES)))
+        data = {source: answers[source].get("search") or {} for source in SEARCHES}
+        rates = [left for answer in answers.values() if (left := (answer.get("rateLimit") or {}).get("remaining")) is not None]
+        rate = min(rates) if rates else None
+        viewer = next(answer["viewer"] for answer in answers.values() if answer.get("viewer"))
         prs: dict[str, PullRequest] = {}
         # Des identifiants et non un compte : une PR qui bouge entre les deux requêtes peut être
         # relue par l'appoint, et la compter deux fois masquerait celle qu'il a sautée.
@@ -269,7 +309,6 @@ class GitHub:
 
         for source in SEARCHES:
             take(source, data.get(source) or {})
-        self.head = set().union(*read.values())
         # Une recherche qui déborde perd ses PR les moins récemment actives : un draft en sommeil
         # sortait du menu dès qu'on ouvrait d'autres PR. Sa suite est lue à part, au prix des
         # seules PR manquantes, plutôt qu'en relevant `max_per_search` pour les six recherches.
@@ -287,6 +326,35 @@ class GitHub:
             rate = (extra.get("rateLimit") or {}).get("remaining")
             for source in sources:
                 take(source, extra.get(source) or {})
+        # Une source que la lecture précédente donnait à une PR et qu'aucune recherche ne lui rend
+        # n'est pas perdue pour autant : la liste peut être partielle. Elle se vérifie sur la PR,
+        # relue directement si aucune recherche ne l'a rendue (par lots de cent, le plafond de
+        # GitHub) ; fermée ou mergée, elle sort des PR ouvertes. Voir `holds`.
+        me = self.cfg.view_as or viewer["login"]
+        scope = (viewer["login"], *sorted(variables.items()))
+        if scope != self.known_for:
+            self.known, self.known_for, self.misses = {}, scope, {}
+        absent = [pr_id for pr_id in self.known if pr_id not in prs]
+        fresh: dict[str, PullRequest] = {}
+        for start in range(0, len(absent), 100):
+            found = self.graphql(NODES_QUERY, {"ids": absent[start : start + 100]}, partial=True)
+            rate = (found.get("rateLimit") or {}).get("remaining", rate)
+            fresh.update({node["id"]: _parse_pr(node) for node in found.get("nodes") or [] if node and node.get("state") == "OPEN"})
+        misses: dict[tuple[str, str], int] = {}
+        for pr_id, sources in self.known.items():
+            pr = prs.get(pr_id) or fresh.get(pr_id)
+            if pr is None:
+                continue
+            for source in sources - pr.sources:
+                verdict = self.holds(pr, source, me)
+                if verdict is None and self.misses.get((pr_id, source), 0) < VANISH_GRACE:
+                    misses[(pr_id, source)] = self.misses.get((pr_id, source), 0) + 1
+                if verdict or (pr_id, source) in misses:
+                    pr.sources.add(source)
+            if pr.sources:
+                prs[pr_id] = pr
+        self.misses = misses
+        self.known = {pr.id: frozenset(pr.sources) for pr in prs.values()}
         # Après un merge sur sa branche cible, GitHub recalcule la fusionnabilité de chaque PR et
         # répond `UNKNOWN` le temps du calcul : sans mémoire, « Mes PR en conflit » s'éteignait
         # puis revenait à chaque merge sur main. Le dernier état connu tient jusqu'au verdict.
@@ -294,10 +362,11 @@ class GitHub:
             if pr.mergeable == "UNKNOWN":
                 pr.mergeable = self.mergeable.get(pr.id, pr.mergeable)
         self.mergeable = {pr.id: pr.mergeable for pr in prs.values() if pr.mergeable in ("CONFLICTING", "MERGEABLE")}
+        kept = {source: sum(1 for pr in prs.values() if source in pr.sources) for source in SEARCHES}
         truncated = [
-            f"{source} ({count} résultats, {len(read[source])} lus)"
+            f"{source} ({count} résultats, {kept[source]} lus)"
             for source in SEARCHES
-            if (count := (data.get(source) or {}).get("issueCount") or 0) > len(read[source])
+            if (count := (data.get(source) or {}).get("issueCount") or 0) > kept[source]
         ]
         # Un avis rendu hors de la fenêtre de revues lue est un avis perdu : « approuvée » et
         # « à corriger » se déduisent du dernier verdict de chacun, et sur une PR très commentée
@@ -307,8 +376,26 @@ class GitHub:
         deep = [pr.slug for pr in prs.values() if pr.reviews_count > len(pr.reviews)]
         if deep:
             truncated.append(f"revues non lues sur {', '.join(sorted(deep)[:3])}")
-        self.viewer_face = (data.get("viewer") or {}).get("avatarUrl") or ""
-        return list(prs.values()), data["viewer"]["login"], rate, truncated
+        self.viewer_face = viewer.get("avatarUrl") or ""
+        return list(prs.values()), viewer["login"], rate, truncated
+
+    def holds(self, pr: PullRequest, source: str, me: str) -> bool | None:
+        """La PR relève-t-elle toujours de cette recherche ? `None` quand elle ne permet pas d'en juger.
+
+        L'auteur tranche pour `mine`, la demande de review en cours pour `toReview` — nominative,
+        ou d'équipe quand les demandes d'équipe comptent. On ne cesse pas d'avoir commenté ou
+        reviewé. Une assignation ou une mention ne se lisent pas ici : elles tiennent
+        VANISH_GRACE lectures, puis la PR est tenue pour sortie de ces recherches.
+        """
+        if source == "mine":
+            return pr.author == me
+        if source == "toReview":
+            return me in pr.reviewers or (
+                not self.cfg.direct_review_requests_only and any(name.startswith("@") for name in pr.reviewers)
+            )
+        if source in ("commented", "reviewed"):
+            return True
+        return None
 
     def fetch_people(self) -> list[Person]:
         """Membres des organisations de `scope`, les plus récemment actifs d'abord."""
@@ -599,9 +686,14 @@ class GitHub:
         variables = {
             key: self.cfg.scoped(query.replace("{since}", since)) for key, query in CLOSED_SEARCHES.items()
         }
-        variables["mine_n"] = max(1, min(mine, 50))
-        variables["involved_n"] = max(1, min(involved, 50))
-        data = self.graphql(CLOSED_QUERY, variables)
+        sizes = {"mine": max(1, min(mine, 50)), "involved": max(1, min(involved, 50))}
+        self.token()  # résolu avant les fils, qui le liraient sinon chacun de leur côté
+        with ThreadPoolExecutor(max_workers=len(CLOSED_SEARCHES)) as pool:
+            answers = dict(
+                zip(CLOSED_SEARCHES, pool.map(lambda source: self.read_search(CLOSED_QUERY, variables[source], sizes[source]), CLOSED_SEARCHES))
+            )
+        data = {source: answers[source].get("search") or {} for source in CLOSED_SEARCHES}
+        rates = [left for answer in answers.values() if (left := (answer.get("rateLimit") or {}).get("remaining")) is not None]
         vus: dict[str, Closure] = {}
         truncated: list[str] = []
         deep: list[str] = []
@@ -622,7 +714,7 @@ class GitHub:
                     vus.setdefault(closure.pr.id, closure)
         if deep:
             truncated.append(f"fils non lus sur {', '.join(sorted(set(deep))[:3])}")
-        return list(vus.values()), (data.get("rateLimit") or {}).get("remaining"), truncated
+        return list(vus.values()), min(rates) if rates else None, truncated
 
     def fetch_code_owners(self, prs: list[PullRequest]) -> dict[str, tuple[str, ...]]:
         """Propriétaires dont la review sera obligatoire, pour les PR où GitHub ne l'a pas dit.
@@ -723,6 +815,16 @@ def service_status() -> tuple[str, str]:
 def signature_of(stamps: dict[str, datetime]) -> str:
     """Empreinte comparable d'un ensemble de PR et de leurs dates de mise à jour."""
     return "|".join(f"{pr}:{stamp.isoformat()}" for pr, stamp in sorted(stamps.items()))
+
+
+def covered(probe: str, known: str) -> bool:
+    """La sonde ne montre rien que l'empreinte connue n'ait déjà : ni PR nouvelle, ni date qui bouge.
+
+    Une PR absente de la sonde ne compte pas : la recherche de GitHub rend parfois des listes
+    partielles, sans erreur, et y voir un changement paierait une requête complète à chaque fois.
+    Une PR réellement fermée sort à la requête complète forcée suivante.
+    """
+    return set(filter(None, probe.split("|"))) <= set(known.split("|"))
 
 
 def _note(store: dict[str, datetime], login: str | None, when: datetime) -> None:

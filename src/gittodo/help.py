@@ -90,9 +90,17 @@ rien n'est écrit dans le fichier de réglages.
 
 ## Sources
 
-- PR : six recherches `is:open is:pr` dans une seule requête GraphQL, sur `author:`, \
-`user-review-requested:`, `commenter:`, `reviewed-by:`, `assignee:` et `mentions:`, de \
-`max_per_search` PR chacune. Une recherche qui déborde est lue au-delà dans une requête \
+- PR : six recherches `is:open is:pr`, une requête GraphQL chacune, lancées en parallèle, sur \
+`author:`, `user-review-requested:`, `commenter:`, `reviewed-by:`, `assignee:` et `mentions:`, de \
+`max_per_search` PR chacune. Groupées, elles se suivaient côté GitHub, et un jour où sa recherche \
+est lente le total passait les dix secondes au-delà desquelles GitHub coupe une requête (502, \
+504). La recherche rend aussi, ces jours-là, des listes partielles sans erreur : une recherche qui \
+rend moins que le compte qu'elle annonce est relancée. Une PR de la lecture précédente qu'une \
+recherche ne rend plus garde cette source si la PR elle-même la confirme : son auteur pour tes \
+PR, la demande de review en cours pour « À reviewer » ; on ne cesse pas d'avoir commenté ou \
+reviewé ; une assignation ou une mention tient trois lectures. Absente de toutes les recherches, \
+elle est relue directement, par son identifiant ; fermée ou mergée, elle sort des PR ouvertes, et \
+paraît aux clôturées à leur prochaine lecture si elle y a sa place. Une recherche qui déborde est lue au-delà dans une requête \
 d'appoint, trente PR au plus toutes recherches confondues, les tiennes d'abord : elle ne coûte \
 que les PR manquantes — deux points pour trois, vingt au pire — et rien quand aucune ne déborde. \
 Triées par mise à jour, ce sont les PR en sommeil, un vieux draft par exemple, qui sortaient \
@@ -112,8 +120,9 @@ de cent au plus et le menu signale la troncature au-delà, et l'API ne donne ni 
 numéro : `resolve_mentions()` les complète en une requête d'alias pour tout le lot. Ouvrir la \
 PR la marque lue côté GitHub et la retire de cette seconde source
 - PR clôturées : deux recherches `is:closed`, sur `author:` pour l'histoire de tes PR et \
-`involves:` pour ce qui s'y dit après, dans une requête mesurée à 33 points pour cinquante de \
-chaque, sur sa propre cadence. Une demande restée ouverte sur une PR déjà mergée ne se voit \
+`involves:` pour ce qui s'y dit après, une requête chacune, lancées en parallèle et mesurées \
+ensemble à 33 points pour cinquante de chaque, sur leur propre cadence. Une clôture absente \
+d'une lecture est gardée tant qu'elle reste dans la fenêtre, la liste pouvant être partielle. Une demande restée ouverte sur une PR déjà mergée ne se voit \
 nulle part ailleurs, et `involves:` étant triée par date de mise à jour, un message neuf ramène \
 de lui-même sa PR dans la fenêtre. Les messages sont lus aussi loin que sur une PR ouverte, \
 parce que c'est gratuit et que c'est là que ça se joue : une demande sans réponse se cachait au \
@@ -132,9 +141,10 @@ de leurs PR, `Ref.compare` l'écart à la branche par défaut
 `rateLimit` accorde 5 000 points par heure. La requête complète des PR en coûte une quarantaine.
 
 - toutes les 20 s (`refresh_seconds`), une sonde à 1 point lit `id` et `updatedAt` de la \
-première page des mêmes recherches. Empreinte identique, le cycle s'arrête là. Une PR plus loin \
-qui bouge remonte d'elle-même en tête, et la requête complète forcée relit le reste
-- empreinte différente : requête complète
+première page des mêmes recherches. Rien de nouveau — ni PR inconnue, ni date qui bouge — et le \
+cycle s'arrête là : une PR absente de la sonde ne compte pas, la liste pouvant être partielle. \
+Une PR plus loin qui bouge remonte d'elle-même en tête, et la requête complète forcée relit le reste
+- PR inconnue ou date qui bouge : requête complète
 - toutes les 60 s au plus tard (`full_refresh_seconds`), requête complète forcée. Une réaction \
 et un `isResolved` ne changent pas `updatedAt`, la sonde ne peut pas les voir
 - chaque cycle revalide aussi l'affichage, branches comprises. Une branche supprimée sort en 20 s
@@ -158,10 +168,11 @@ Trois niveaux, du plus bénin au plus grave, à la couleur du triangle et au tit
 
 - jaune, « données incomplètes » : rien n'est cassé chez GitHub, mais l'app ne peut plus tout \
 lire. Quota épuisé, ou droits refusés au token
-- orange, « GitHub répond mal » : une source auxiliaire tombe en erreur serveur ou reste \
-injoignable, ou GitHub annonce un incident `minor`
-- rouge, « GitHub en panne » : la requête des PR elle-même échoue, ou GitHub annonce un incident \
-`major` ou `critical`
+- orange, « GitHub répond mal » : une source, celle des PR comprise, tombe en erreur serveur ou \
+reste injoignable alors que l'API répond encore à une requête minimale, ou GitHub annonce un \
+incident `minor`. Une recherche lente ou une requête coupée n'est pas une panne
+- rouge, « GitHub en panne » : GitHub annonce un incident `major` ou `critical`, ou l'API ne \
+répond plus du tout, même à une requête minimale
 
 Le niveau croise nos propres échecs avec la gravité publiée par GitHub. Quand quelque chose \
 échoue, et seulement dans ce cas, l'app lit `githubstatus.com/api/v2/status.json` au plus une \

@@ -110,6 +110,7 @@ FORM: tuple[tuple[str, tuple[tuple[str, str, str, str], ...]], ...] = (
                 "il se remplit autour de la photo jusqu'à la prochaine lecture",
                 "",
             ),
+            ("sounds", "Son à chaque nouvel élément", "une note douce de vibraphone quand un compteur gagne un élément", ""),
         ),
     ),
     (

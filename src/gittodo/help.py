@@ -358,6 +358,15 @@ sur la PR d'autrui s'éteint au clic ; la demande, non, ni le message d'un fil r
 l'histoire des clôturées, une ligne qui compte encore est rattrapée en fin de section plutôt \
 qu'escamotée.
 
+Une note douce de vibraphone sonne quand un compteur, rouge ou violet, gagne un élément. \
+L'élément est la PR, pas sa ligne : une PR qui change de section ou passe du rouge au violet — \
+mergée, fil résolu — ne sonne pas. Il faut qu'elle compte davantage qu'à la lecture précédente, \
+avec une ligne jamais vue : un conflit qui s'efface le temps d'un recalcul chez GitHub puis \
+revient à l'identique se tait. Un message, lui, se reconnaît à son adresse : chaque nouveau \
+message qui t'attend sonne, même sur une PR déjà comptée, même quand il prend la place d'un \
+conflit ou d'une review demandée sans changer le nombre. La première lecture et le passage à une autre identité ne sonnent \
+jamais. `sounds` la coupe, aussi depuis le menu **Sons**.
+
 Par défaut, la photo de l'identité observée, une pastille rouge, et un anneau qui se remplit \
 dans le sens horaire jusqu'au prochain cycle. L'anneau s'efface pendant une lecture, où le \
 compteur animé prend le relais ; il continue de tourner quand une source ne répond plus, \

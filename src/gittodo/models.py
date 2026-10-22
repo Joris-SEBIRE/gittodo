@@ -284,10 +284,12 @@ class Item:
     # La PR est fermée ou le fil résolu : la ligne compte dans la pastille violette, pas dans la rouge.
     # Les deux sommes restent égales à leur badge respectif.
     closed: bool = False
-    # Adresses des messages que compte une ligne de fils résolus, du plus ancien au plus récent :
-    # chaque clic ouvre le premier qui n'a pas encore été ouvert, et n'éteint que lui. Vide sur ma
-    # propre PR, où seuls une réponse ou une réaction éteignent la ligne.
+    # Adresses des messages que compte la ligne, du plus ancien au plus récent : un message
+    # jamais vu fait sonner, même sur une PR déjà comptée.
     messages: tuple[str, ...] = ()
+    # Ligne de fils résolus sur la PR d'autrui : chaque clic ouvre le plus ancien message pas
+    # encore ouvert, et n'éteint que lui. Sur ma PR, seuls une réponse ou une réaction l'éteignent.
+    read_on_open: bool = False
 
     @property
     def group(self) -> Group:

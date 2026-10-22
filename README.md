@@ -114,6 +114,12 @@ pour elle.
   activité sur GitHub. Le masquage est local, rien n'est écrit sur GitHub.
 - **⌘** maintenu : la ligne devient « Copier le lien ».
 - **⌘R** : actualise tout de suite.
+- Une note douce de vibraphone sonne quand un compteur gagne un élément : une PR à traiter, une
+  clôture faite par quelqu'un d'autre, et chaque nouveau message qui t'attend, même sur une PR
+  déjà comptée. Une PR qui change seulement de section ou de couleur — mergée, fil résolu — ne
+  sonne pas, ni une ligne qui s'efface un instant puis revient à l'identique, ni la première
+  lecture. Le menu **Sons** la coupe. Le son est `src/gittodo/nouveau.wav`, fabriqué par
+  `scripts/sons.py`.
 - Le token peut se coller dans le champ **Token GitHub** de la fenêtre de réglages : ⌘V y
   fonctionne, le bouton au bout du champ le range dans le trousseau et l'essaie aussitôt, et le
   bandeau du bas dit le compte auquel il donne accès ou la raison du refus.

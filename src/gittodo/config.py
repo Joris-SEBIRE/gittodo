@@ -98,6 +98,8 @@ class Config:
     # Anneau de progression autour de la photo : il se remplit jusqu'au prochain cycle, ce qui
     # dit quand l'app va relire sans avoir à ouvrir le menu.
     show_refresh_ring: bool = True
+    # Une note douce de vibraphone quand un compteur gagne un élément.
+    sounds: bool = True
     # Format de l'élément dans la barre : "avatar" (photo de l'identité + pastille de
     # comptage, ~35-40 pt), "count" (nombre seul, ~35 pt), "icon_count" (~57 pt),
     # "icon" (icône seule, ~34 pt). Une barre saturée évince les éléments les plus larges.

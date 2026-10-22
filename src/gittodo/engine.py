@@ -357,6 +357,7 @@ def _messages(pr: PullRequest, me: str, ignored: set[str], acks: set[str]) -> li
                 avatar=oldest.avatar,
                 faces=tuple(face for face in speaking.values() if face),
                 hint=extra.pop("hint", f"{len(batch)} message(s) de {who} {verb} : {', '.join(parts)}"),
+                messages=tuple(comment.url for comment in sorted(comments, key=lambda comment: comment.created_at)),
                 **extra,
             )
         )
@@ -382,10 +383,7 @@ def _messages(pr: PullRequest, me: str, ignored: set[str], acks: set[str]) -> li
     # Sa propre clé : lu, il disparaît, et la ligne qu'il aurait évincée de la PR doit rester.
     who = ", ".join("@" + name for name in sorted({comment.author for comment, _ in to_read}))
     add(
-        Kind.RESOLVED_THREADS, to_read, "", "écrit par", key=f"{pr.id}:resolved", closed=True,
-        messages=() if mine else tuple(
-            comment.url for comment, _ in sorted(to_read, key=lambda pair: pair[0].created_at)
-        ),
+        Kind.RESOLVED_THREADS, to_read, "", "écrit par", key=f"{pr.id}:resolved", closed=True, read_on_open=not mine,
         hint=(
             f"messages de {who} dans des fils résolus de ta PR : une réponse ou une réaction les acquitte"
             if mine

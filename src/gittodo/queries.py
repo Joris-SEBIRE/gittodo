@@ -57,17 +57,20 @@ fragment PR on PullRequest {
     __typename ... on User{login avatarUrl(size: 64)} ... on Team{slug avatarUrl(size: 64)} } } }
   reviews(last:50){ totalCount nodes { author { login avatarUrl(size: 64) } state submittedAt } }
   commits(last:1){ nodes { commit { committedDate statusCheckRollup { state } } } }
-  reviewThreads(first:30){
-    totalCount
-    nodes { id isResolved isOutdated path line
-      opener: comments(first:1){ nodes { author { __typename login } } }
-      comments(last:12){ totalCount nodes { state author { __typename login avatarUrl(size: 64) } createdAt url body
-        reactionGroups { content viewerHasReacted } } } }
-  }
+  reviewThreads(first:30){ totalCount pageInfo { endCursor } nodes { ...Thread } }
   comments(last:15){ totalCount nodes { author { __typename login avatarUrl(size: 64) } createdAt url body
     reactionGroups { content viewerHasReacted } } }
 }
 """
+THREAD_FRAGMENT = """
+fragment Thread on PullRequestReviewThread {
+  id isResolved isOutdated path line
+  opener: comments(first:1){ nodes { author { __typename login } } }
+  comments(last:12){ totalCount nodes { state author { __typename login avatarUrl(size: 64) } createdAt url body
+    reactionGroups { content viewerHasReacted } } }
+}
+"""
+PR_FRAGMENT += THREAD_FRAGMENT
 SEARCH_QUERY += PR_FRAGMENT
 
 # Une PR relue sans passer par la recherche, quand celle-ci l'a perdue : son état dit si elle est
@@ -83,6 +86,22 @@ query($ids:[ID!]!) {
 # SEARCHES : mes PR d'abord. Une PR coûte ~0,65 point, mesuré : la suite ne coûte que les PR
 # manquantes, rien quand aucune recherche ne déborde, et vingt points au pire.
 OVERFLOW_BUDGET = 30
+
+
+def threads_query(count: int) -> str:
+    """Suite des fils de revue de `count` PR, une page chacune, à partir de leur curseur.
+
+    Les fils viennent dans l'ordre de leur ouverture : sur une PR très commentée, ceux qui
+    dépassent la première page sont les plus récents, ceux qu'on attend. Seuls les fils
+    manquants sont demandés, et seulement pour ces PR.
+    """
+    params = ",".join(f"$id{i}:ID!,$after{i}:String!,$n{i}:Int!" for i in range(count))
+    blocks = "\n".join(
+        f"  p{i}: node(id:$id{i}) {{ ... on PullRequest {{ reviewThreads(first:$n{i}, after:$after{i}) "
+        f"{{ pageInfo {{ endCursor hasNextPage }} nodes {{ ...Thread }} }} }} }}"
+        for i in range(count)
+    )
+    return f"query({params}) {{\n  rateLimit {{ remaining }}\n{blocks}\n}}\n{THREAD_FRAGMENT}"
 
 
 def more_query(sources: list[str]) -> str:

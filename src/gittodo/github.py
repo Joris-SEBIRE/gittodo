@@ -29,6 +29,7 @@ from .queries import (
     SEARCHES,
     SENTINEL_QUERY,
     more_query,
+    threads_query,
 )
 
 API = "https://api.github.com"
@@ -39,6 +40,9 @@ SEARCH_ATTEMPTS = 3
 # ne se vérifie pas sur elle (assignation, mention). Mesurée à une sur trois avant relance, une
 # liste partielle n'en fait pas manquer trois de suite après relances.
 VANISH_GRACE = 3
+# Pages de fils lues au-delà de la première, cent fils chacune : de quoi couvrir une PR de 330
+# fils, bien au-delà de ce qu'une revue produit.
+THREAD_PAGES = 3
 EPOCH = datetime.fromtimestamp(0, tz=timezone.utc)
 # Boîte des non-lues : l'API plafonne à 50 par page quoi qu'on demande, et dix pages
 # couvrent les comptes très bruyants (mesuré : 424 non lues, la seule mention en page 6).
@@ -299,6 +303,15 @@ class GitHub:
         # relue par l'appoint, et la compter deux fois masquerait celle qu'il a sautée.
         read: dict[str, set[str]] = {}
 
+        # PR dont les fils dépassent la première page : curseur, et fils qui restent à lire.
+        pages: dict[str, tuple[str, int]] = {}
+
+        def overflow(node: dict) -> None:
+            threads = node.get("reviewThreads") or {}
+            left = (threads.get("totalCount") or 0) - len(threads.get("nodes") or [])
+            if left > 0 and (cursor := (threads.get("pageInfo") or {}).get("endCursor")):
+                pages[node["id"]] = (cursor, left)
+
         def take(source: str, block: dict) -> None:
             nodes = [n for n in (block.get("nodes") or []) if n]
             read.setdefault(source, set()).update(node["id"] for node in nodes)
@@ -306,6 +319,7 @@ class GitHub:
                 pr = prs.get(node["id"]) or _parse_pr(node)
                 pr.sources.add(source)
                 prs[pr.id] = pr
+                overflow(node)
 
         for source in SEARCHES:
             take(source, data.get(source) or {})
@@ -339,7 +353,10 @@ class GitHub:
         for start in range(0, len(absent), 100):
             found = self.graphql(NODES_QUERY, {"ids": absent[start : start + 100]}, partial=True)
             rate = (found.get("rateLimit") or {}).get("remaining", rate)
-            fresh.update({node["id"]: _parse_pr(node) for node in found.get("nodes") or [] if node and node.get("state") == "OPEN"})
+            for node in found.get("nodes") or []:
+                if node and node.get("state") == "OPEN":
+                    fresh[node["id"]] = _parse_pr(node)
+                    overflow(node)
         misses: dict[tuple[str, str], int] = {}
         for pr_id, sources in self.known.items():
             pr = prs.get(pr_id) or fresh.get(pr_id)
@@ -355,6 +372,29 @@ class GitHub:
                 prs[pr_id] = pr
         self.misses = misses
         self.known = {pr.id: frozenset(pr.sources) for pr in prs.values()}
+        # Les fils s'ordonnent par ouverture : sur une PR très commentée, ceux qui dépassent la
+        # première page sont les derniers ouverts — une revue de la veille, quatorze fils d'un
+        # coup, restait invisible. Leur suite est lue à part, au plus juste.
+        pages = {pr_id: page for pr_id, page in pages.items() if pr_id in prs}
+        for _ in range(THREAD_PAGES):
+            if not pages:
+                break
+            order = list(pages)
+            asked = {}
+            for i, pr_id in enumerate(order):
+                asked.update({f"id{i}": pr_id, f"after{i}": pages[pr_id][0], f"n{i}": min(100, pages[pr_id][1])})
+            found = self.graphql(threads_query(len(order)), asked)
+            rate = (found.get("rateLimit") or {}).get("remaining", rate)
+            following: dict[str, tuple[str, int]] = {}
+            for i, pr_id in enumerate(order):
+                block = (found.get(f"p{i}") or {}).get("reviewThreads") or {}
+                nodes = [thread for thread in block.get("nodes") or [] if thread]
+                prs[pr_id].threads += tuple(_parse_thread(thread) for thread in nodes)
+                left = pages[pr_id][1] - len(nodes)
+                info = block.get("pageInfo") or {}
+                if left > 0 and nodes and info.get("hasNextPage") and info.get("endCursor"):
+                    following[pr_id] = (info["endCursor"], left)
+            pages = following
         # Après un merge sur sa branche cible, GitHub recalcule la fusionnabilité de chaque PR et
         # répond `UNKNOWN` le temps du calcul : sans mémoire, « Mes PR en conflit » s'éteignait
         # puis revenait à chaque merge sur main. Le dernier état connu tient jusqu'au verdict.
@@ -376,6 +416,8 @@ class GitHub:
         deep = [pr.slug for pr in prs.values() if pr.reviews_count > len(pr.reviews)]
         if deep:
             truncated.append(f"revues non lues sur {', '.join(sorted(deep)[:3])}")
+        if pages:
+            truncated.append(f"fils non lus sur {', '.join(sorted(prs[pr_id].slug for pr_id in pages)[:3])}")
         self.viewer_face = viewer.get("avatarUrl") or ""
         return list(prs.values()), viewer["login"], rate, truncated
 
@@ -852,6 +894,18 @@ def _thread_comments(thread: dict) -> tuple[Comment, ...]:
     return tuple(_comment(c) for c in ((thread.get("comments") or {}).get("nodes") or []) if _spoken(c))
 
 
+def _parse_thread(t: dict) -> Thread:
+    return Thread(
+        id=t["id"],
+        resolved=bool(t.get("isResolved")),
+        outdated=bool(t.get("isOutdated")),
+        path=t.get("path") or "",
+        line=t.get("line"),
+        comments=_thread_comments(t),
+        opener=_actor((((t.get("opener") or {}).get("nodes") or [{}])[0]).get("author"))[0],
+    )
+
+
 def _comment(node: dict) -> Comment:
     login, is_bot, avatar = _actor(node.get("author"))
     return Comment(
@@ -945,18 +999,7 @@ def _parse_pr(node: dict) -> PullRequest:
                 owners.append(asked)
             if face := reviewer.get("avatarUrl"):
                 portraits[name] = face
-    threads = tuple(
-        Thread(
-            id=t["id"],
-            resolved=bool(t.get("isResolved")),
-            outdated=bool(t.get("isOutdated")),
-            path=t.get("path") or "",
-            line=t.get("line"),
-            comments=_thread_comments(t),
-            opener=_actor((((t.get("opener") or {}).get("nodes") or [{}])[0]).get("author"))[0],
-        )
-        for t in ((node.get("reviewThreads") or {}).get("nodes") or [])
-    )
+    threads = tuple(_parse_thread(t) for t in ((node.get("reviewThreads") or {}).get("nodes") or []))
     reviews = []
     for r in ((node.get("reviews") or {}).get("nodes") or []):
         who = (r.get("author") or {}).get("login") or "ghost"

@@ -106,7 +106,10 @@ que les PR manquantes — deux points pour trois, vingt au pire — et rien quan
 Triées par mise à jour, ce sont les PR en sommeil, un vieux draft par exemple, qui sortaient \
 sinon du menu. Chaque PR remonte ses \
 `reviewThreads` avec `isResolved`, ses `comments`, ses `reactionGroups`, ses `reviews`, plus \
-`mergeable`, `statusCheckRollup`, `reviewRequests`, `headRefName` et `baseRefName`. Les revues \
+`mergeable`, `statusCheckRollup`, `reviewRequests`, `headRefName` et `baseRefName`. Les fils \
+viennent dans l'ordre de leur ouverture, trente par PR : au-delà, sur une PR très commentée, ce \
+sont les derniers ouverts — une revue de la veille, quatorze fils d'un coup — et leur suite est \
+lue à part, en ne demandant que les fils manquants (un point pour quatorze). Les revues \
 sont lues loin — cinquante, et c'est gratuit : chaque commentaire en ligne en crée une, et une \
 approbation poussée hors de la fenêtre ferait sortir la PR de « Mes PR à merger » sans que rien \
 n'ait bougé. Au-delà, le menu le dit en bas

@@ -158,10 +158,12 @@ CLOSED_SEARCHES = {
 # Une requête par recherche, comme pour les PR ouvertes : groupées, les deux passaient 8,5 s un
 # jour de lenteur, à un souffle des dix secondes au-delà desquelles GitHub coupe.
 CLOSED_QUERY = """
-query($q:String!,$n:Int!) {
+query($q:String!,$n:Int!,$after:String) {
   rateLimit { cost remaining }
-  search(query:$q, type:ISSUE, first:$n) { issueCount nodes { ...Fin } }
+  search(query:$q, type:ISSUE, first:$n, after:$after) { issueCount pageInfo { endCursor hasNextPage } nodes { ...Fin } }
 }
+"""
+CLOSED_FRAGMENT = """
 fragment Fin on PullRequest {
   id number title url state merged mergedAt closedAt updatedAt
   headRefName baseRefName
@@ -179,3 +181,14 @@ fragment Fin on PullRequest {
       reactionGroups { content viewerHasReacted } } } } }
 }
 """
+CLOSED_QUERY += CLOSED_FRAGMENT
+
+# Une PR fermée relue par son identifiant : sortie des recherches faute d'activité depuis
+# `closed_days` jours, elle porte encore un message qui attend.
+CLOSED_NODES_QUERY = """
+query($ids:[ID!]!) {
+  rateLimit { remaining }
+  nodes(ids:$ids) { ... on PullRequest { ...Fin } }
+}
+""" + CLOSED_FRAGMENT
+

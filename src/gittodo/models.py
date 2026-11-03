@@ -324,6 +324,8 @@ class Snapshot:
     error: str | None = None
     truncated: list[str] = field(default_factory=list)
     people: tuple[Person, ...] = ()
+    # PR fermées dont un message attend encore : relues au-delà de la fenêtre des clôturées.
+    watched: tuple[str, ...] = ()
 
     @property
     def impersonating(self) -> bool:

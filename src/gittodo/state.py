@@ -97,6 +97,11 @@ class State:
         # liste partielle de GitHub vide le menu, puis le fait sonner en se remplissant.
         self.known: dict[str, list[str]] = dict(raw.get("known") or {})
         self.known_for: list = list(raw.get("known_for") or [])
+        # Par identité, les PR fermées dont un message attend encore : sorties des recherches
+        # faute d'activité depuis `closed_days` jours, elles sont relues jusqu'à l'acquittement.
+        self.watched: dict[str, list[str]] = dict(raw.get("watched") or {})
+        # Identités déjà balayées en profondeur (voir `sweep_closed`) : une fois suffit.
+        self.swept: list[str] = list(raw.get("swept") or [])
         self.scope = ""
 
     def save(self) -> None:
@@ -109,6 +114,8 @@ class State:
                     "opened": self.opened,
                     "known": self.known,
                     "known_for": self.known_for,
+                    "watched": self.watched,
+                    "swept": self.swept,
                 },
                 indent=1,
             ),

@@ -86,6 +86,12 @@ FROZEN_AFTER = 120.0
 STUCK_AFTER = 90.0
 # Une note douce de vibraphone, fabriquée par scripts/sons.py.
 CHIME_PATH = Path(__file__).with_name("nouveau.wav")
+# Lignes d'un message qui attend : sur une PR fermée, elles la font relire au-delà de sa fenêtre.
+WAITING_KINDS = (Kind.MESSAGES_TO_ANSWER, Kind.REPLIES_TO_CHECK, Kind.RESOLVED_THREADS)
+# Balayage unique des clôturées, au premier passage sur ton identité : profondeur et pages lues.
+# Mesuré à 26 s et 204 points pour 328 PR, d'où son propre fil.
+SWEEP_DAYS = 180
+SWEEP_PAGES = 8
 MAX_ROWS_PER_GROUP = 15
 # Toutes les images font la même largeur : le badge ne tremble pas pendant l'animation.
 SPINNER_FRAMES = ("◐", "◓", "◑", "◒")
@@ -823,6 +829,8 @@ class GitTodoApp(NSObject):
         self.footer_item = None
         self.footer_rows, self.footer_active = [], []
         self.bell = Bell()
+        # Balayage profond des clôturées : en cours, puis son résultat jusqu'à ce qu'il entre.
+        self.sweeping, self.sweep, self.sweep_merged = False, None, False
         self.ding = NSSound.alloc().initWithContentsOfFile_byReference_(str(CHIME_PATH), True)
         self.shortcut_row = None
         self.hover_timer = None
@@ -913,10 +921,25 @@ class GitTodoApp(NSObject):
             self.clear_incident("closed")
             return []
         age = None if self.closures_at is None else (now() - self.closures_at).total_seconds()
-        if age is not None and age < max(20, self.cfg.closed_refresh_seconds):
+        # Un balayage profond terminé n'attend pas la cadence lente : il entre tout de suite.
+        if age is not None and age < max(20, self.cfg.closed_refresh_seconds) and self.sweep is None:
             return self.closures
         try:
             found, _, limit = self.client.fetch_closed(self.cfg.closed_days)
+            # Un message resté sans réponse ne s'éteint pas avec le temps : sa PR, sortie des
+            # recherches faute d'activité, est relue directement jusqu'à l'acquittement.
+            read = {closure.pr.id for closure in found}
+            if gone := [pr_id for pr_id in self.state.watched.get(self.state.scope, []) if pr_id not in read]:
+                found = found + self.client.fetch_closures(gone)
+            # Une app neuve, ou dont l'état a été effacé, ne sait rien des PR déjà sorties de la
+            # fenêtre : un balayage unique, plus profond, les retrouve. Seulement pour soi.
+            if not self.cfg.view_as and "" not in self.state.swept:
+                if self.sweep is None:
+                    self.sweep_closed()
+                else:
+                    read = {closure.pr.id for closure in found}
+                    found = found + [closure for closure in self.sweep if closure.pr.id not in read]
+                    self.sweep_merged = True
         except GitHubError as exc:
             log_error(f"suivi des clôturées ignoré : {type(exc).__name__}: {exc}")
             self.note_incident("closed", exc)
@@ -934,6 +957,28 @@ class GitTodoApp(NSObject):
         ]
         self.closures, self.closures_at, self.closures_limit = found, now(), limit
         return found
+
+    @objc.python_method
+    def sweep_closed(self) -> None:
+        """Lance le balayage des clôturées sur SWEEP_DAYS, dans son propre fil.
+
+        Son résultat entre à la lecture suivante des clôturées, sans attendre leur cadence : les PR
+        qui portent encore un message en attente passent alors dans la liste surveillée.
+        Un échec se retente à la lecture suivante.
+        """
+        if self.sweeping:
+            return
+        self.sweeping = True
+
+        def work() -> None:
+            try:
+                self.sweep = self.client.fetch_closed(SWEEP_DAYS, pages=SWEEP_PAGES)[0]
+            except GitHubError as exc:
+                log_error(f"balayage des clôturées remis : {type(exc).__name__}: {exc}")
+            finally:
+                self.sweeping = False
+
+        threading.Thread(target=work, daemon=True).start()
 
     @objc.python_method
     def note_incident(self, source: str, trouble, kind: str = "") -> None:
@@ -1274,8 +1319,10 @@ class GitTodoApp(NSObject):
             opened = {pr.id for pr in prs}
             closures = [closure for closure in self.read_closures() if closure.pr.id not in opened]
             truncated = truncated + self.closures_limit
+            items = build_items(prs, notifications, identity, self.cfg, self.branches, closures)
+            closed = {closure.pr.id for closure in closures}
             snapshot = Snapshot(
-                items=build_items(prs, notifications, identity, self.cfg, self.branches, closures),
+                items=items,
                 viewer=viewer,
                 identity=identity,
                 fetched_at=now(),
@@ -1283,6 +1330,11 @@ class GitTodoApp(NSObject):
                 rate_remaining=rate,
                 truncated=truncated,
                 people=self.people,
+                watched=tuple(sorted({
+                    item.id.split(":")[1]
+                    for item in items
+                    if item.closed and item.kind in WAITING_KINDS and item.id.split(":")[1] in closed
+                })),
             )
         except GitHubError as exc:
             snapshot = self._failed(str(exc), exc)
@@ -1447,6 +1499,13 @@ class GitTodoApp(NSObject):
             self.state.prune(snapshot.items)
             self.state.known = {pr_id: sorted(sources) for pr_id, sources in self.client.known.items()}
             self.state.known_for = list(self.client.known_for)
+            # Seules restent surveillées les PR dont un message compte encore : une ligne déjà
+            # ouverte, ou masquée jusqu'à la prochaine activité, n'a pas à être relue.
+            counting = {item.id.split(":")[1] for item in self.visible() if item.weight}
+            self.state.watched = {**self.state.watched, self.state.scope: [pr_id for pr_id in snapshot.watched if pr_id in counting]}
+            if self.sweep_merged:
+                self.state.swept = [*self.state.swept, ""]
+                self.sweep, self.sweep_merged = None, False
             self.state.save()
             if self.bell.feed(self.visible(), snapshot.identity):
                 self.chime()

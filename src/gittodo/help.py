@@ -125,7 +125,11 @@ PR la marque lue côté GitHub et la retire de cette seconde source
 - PR clôturées : deux recherches `is:closed`, sur `author:` pour l'histoire de tes PR et \
 `involves:` pour ce qui s'y dit après, une requête chacune, lancées en parallèle et mesurées \
 ensemble à 33 points pour cinquante de chaque, sur leur propre cadence. Une clôture absente \
-d'une lecture est gardée tant qu'elle reste dans la fenêtre, la liste pouvant être partielle. Une demande restée ouverte sur une PR déjà mergée ne se voit \
+d'une lecture est gardée tant qu'elle reste dans la fenêtre, la liste pouvant être partielle, et \
+une PR fermée qui porte encore un message en attente est relue directement, par son identifiant, \
+au-delà de la fenêtre et jusqu'à l'acquittement. Une app neuve, ou dont l'état a été effacé, \
+balaie une fois les clôturées des 180 derniers jours, dans son propre fil, pour retrouver celles \
+qui en étaient déjà sorties. Une demande restée ouverte sur une PR déjà mergée ne se voit \
 nulle part ailleurs, et `involves:` étant triée par date de mise à jour, un message neuf ramène \
 de lui-même sa PR dans la fenêtre. Les messages sont lus aussi loin que sur une PR ouverte, \
 parce que c'est gratuit et que c'est là que ça se joue : une demande sans réponse se cachait au \
@@ -363,6 +367,7 @@ est la couleur dont GitHub colore une PR mergée.
 
 Un message sur une PR clôturée suit exactement les mêmes règles qu'une PR ouverte : la date de la \
 clôture n'entre pas en jeu, et une demande posée juste avant le merge attend autant qu'une autre. \
+Sa PR reste lue même quand elle sort de la fenêtre des clôturées faute d'activité. \
 Seuls les acquittements l'éteignent, et ils dépendent de l'endroit : sur un fil de code, répondre \
 ou réagir d'un emoji — le résoudre le fait seulement passer dans « Écrit dans des fils résolus » ; \
 dans la discussion générale, où il n'y a aucun fil à résoudre, réagir ou répondre **en citant** \

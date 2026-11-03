@@ -18,6 +18,7 @@ from . import codeowners
 from .config import CONFIG_PATH, Config
 from .models import Branch, Closure, Comment, Person, PullRequest, Review, Thread, parse_ts
 from .queries import (
+    CLOSED_NODES_QUERY,
     CLOSED_QUERY,
     CLOSED_SEARCHES,
     DIRECT_REVIEW,
@@ -43,6 +44,9 @@ VANISH_GRACE = 3
 # Pages de fils lues au-delà de la première, cent fils chacune : de quoi couvrir une PR de 330
 # fils, bien au-delà de ce qu'une revue produit.
 THREAD_PAGES = 3
+# Pages lues par recherche de clôturées, cinquante PR chacune : un mois d'activité en compte une
+# soixantaine, et ce qui dépassait la première page n'était jamais lu après un redémarrage.
+CLOSED_PAGES = 4
 EPOCH = datetime.fromtimestamp(0, tz=timezone.utc)
 # Boîte des non-lues : l'API plafonne à 50 par page quoi qu'on demande, et dix pages
 # couvrent les comptes très bruyants (mesuré : 424 non lues, la seule mention en page 6).
@@ -265,7 +269,7 @@ class GitHub:
         }
         return signature_of(stamps), (data.get("rateLimit") or {}).get("remaining")
 
-    def read_search(self, document: str, query: str, n: int) -> dict:
+    def read_search(self, document: str, query: str, n: int, after: str | None = None, expected: int | None = None) -> dict:
         """Une recherche, relancée quand GitHub la coupe ou la rend visiblement incomplète.
 
         Un jour de lenteur, la recherche de GitHub rend des listes partielles sans erreur — 9 fois
@@ -276,7 +280,7 @@ class GitHub:
         best: dict = {}
         for attempt in range(SEARCH_ATTEMPTS):
             try:
-                data = self.graphql(document, {"q": query, "n": n})
+                data = self.graphql(document, {"q": query, "n": n, **({"after": after} if after else {})})
             except GitHubError as exc:
                 if best or attempt + 1 < SEARCH_ATTEMPTS and exc.status in (502, 504):
                     continue
@@ -285,7 +289,7 @@ class GitHub:
             found = len([node for node in block.get("nodes") or [] if node])
             if found >= len([node for node in (best.get("search") or {}).get("nodes") or [] if node]):
                 best = data
-            if found >= min(block.get("issueCount") or 0, n):
+            if found >= min(block.get("issueCount") or 0 if expected is None else expected, n):
                 break
         return best
 
@@ -710,7 +714,7 @@ class GitHub:
         return ""
 
     def fetch_closed(
-        self, days: int, mine: int = 50, involved: int = 50
+        self, days: int, mine: int = 50, involved: int = 50, pages: int = CLOSED_PAGES
     ) -> tuple[list[Closure], int | None, list[str]]:
         """PR sorties du périmètre ouvert, avec l'acteur de leur clôture et ce qui s'est dit depuis.
 
@@ -730,10 +734,22 @@ class GitHub:
         }
         sizes = {"mine": max(1, min(mine, 50)), "involved": max(1, min(involved, 50))}
         self.token()  # résolu avant les fils, qui le liraient sinon chacun de leur côté
+        def paged(source: str) -> dict:
+            """La recherche, page après page, jusqu'à `pages` : les nœuds s'ajoutent à la première."""
+            first = self.read_search(CLOSED_QUERY, variables[source], sizes[source])
+            block = first.get("search") or {}
+            for _ in range(pages - 1):
+                info = block.get("pageInfo") or {}
+                # Seules les PR qui restent sont demandées : une page coûte ce qu'elle demande.
+                left = min(sizes[source], (block.get("issueCount") or 0) - len(block.get("nodes") or []))
+                if left <= 0 or not (info.get("hasNextPage") and info.get("endCursor")):
+                    break
+                more = self.read_search(CLOSED_QUERY, variables[source], left, info["endCursor"], expected=left).get("search") or {}
+                block = {**more, "issueCount": block.get("issueCount"), "nodes": (block.get("nodes") or []) + (more.get("nodes") or [])}
+            return {**first, "search": block}
+
         with ThreadPoolExecutor(max_workers=len(CLOSED_SEARCHES)) as pool:
-            answers = dict(
-                zip(CLOSED_SEARCHES, pool.map(lambda source: self.read_search(CLOSED_QUERY, variables[source], sizes[source]), CLOSED_SEARCHES))
-            )
+            answers = dict(zip(CLOSED_SEARCHES, pool.map(paged, CLOSED_SEARCHES)))
         data = {source: answers[source].get("search") or {} for source in CLOSED_SEARCHES}
         rates = [left for answer in answers.values() if (left := (answer.get("rateLimit") or {}).get("remaining")) is not None]
         vus: dict[str, Closure] = {}
@@ -757,6 +773,19 @@ class GitHub:
         if deep:
             truncated.append(f"fils non lus sur {', '.join(sorted(set(deep))[:3])}")
         return list(vus.values()), min(rates) if rates else None, truncated
+
+    def fetch_closures(self, ids: list[str]) -> list[Closure]:
+        """Des PR fermées relues par leur identifiant, hors des recherches, par lots de cent.
+
+        Une PR rouverte entre-temps n'en revient pas : elle est lue avec les PR ouvertes.
+        """
+        found: list[Closure] = []
+        for start in range(0, len(ids), 100):
+            data = self.graphql(CLOSED_NODES_QUERY, {"ids": ids[start : start + 100]}, partial=True)
+            for node in data.get("nodes") or []:
+                if node and node.get("state") in ("MERGED", "CLOSED") and (closure := _parse_closure(node, "involved")):
+                    found.append(closure)
+        return found
 
     def fetch_code_owners(self, prs: list[PullRequest]) -> dict[str, tuple[str, ...]]:
         """Propriétaires dont la review sera obligatoire, pour les PR où GitHub ne l'a pas dit.

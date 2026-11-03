@@ -169,6 +169,11 @@ pour elle.
 - Un message resté sans réponse, lui, ne s'éteint pas avec le temps : une PR clôturée suit
   exactement les mêmes règles qu'une PR ouverte, la date du merge n'entrant pas en jeu. Une
   demande posée juste avant la clôture attend autant qu'une autre — c'est même celle qu'on manque.
+  Une PR fermée qui en porte un reste lue au-delà de la fenêtre des clôturées : sortie des
+  recherches faute d'activité, elle est relue directement, par son identifiant, jusqu'à
+  l'acquittement. Une app neuve, ou dont l'état a été effacé, balaie une fois les clôturées des
+  180 derniers jours pour retrouver celles qui étaient déjà sorties de la fenêtre (26 s, environ
+  200 points, à part du cycle).
   Les gestes qui l'acquittent dépendent de l'endroit : sur un fil de code, répondre ou réagir d'un
   emoji ; dans la discussion générale, où il n'y a aucun fil à résoudre, réagir ou répondre **en
   citant** le message. Reprendre la parole sans citer n'acquitte rien : une liste
@@ -226,7 +231,10 @@ valeurs réelles de ton installation.
 ## Ce que l'app écrit sur ta machine
 
 - `~/.config/gittodo/config.json` : tes réglages.
-- `~/Library/Application Support/GitTodo/state.json` : éléments masqués et éléments déjà vus.
+- `~/Library/Application Support/GitTodo/state.json` : éléments masqués, vus et ouverts, PR de
+  la dernière lecture, et PR fermées dont un message attend encore. L'effacer revient à une app
+  neuve : les lignes masquées ou ouvertes reviennent, et le balayage des 180 derniers jours repart
+  une fois.
 - `~/Library/Application Support/GitTodo/status.json` : ce que la barre affiche, utile au
   diagnostic.
 - `~/Library/Application Support/GitTodo/errors.log` : les pannes et leur pile.

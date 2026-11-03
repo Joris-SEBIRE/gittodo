@@ -161,23 +161,21 @@ def _unanswered(humans: list[Comment], me: str, acks: set[str], only_named: bool
 
 
 def _pending(humans: list[Comment], me: str, acks: set[str], from_mention: bool = False) -> list[Comment]:
-    """Messages des autres depuis ma dernière intervention, accusés de réception exclus.
+    """Messages des autres depuis ma dernière intervention, réponse ou accusé de réception.
 
-    Un 👍 posé sur un message vaut réponse : le point est acté, il n'y a plus à y revenir.
+    Un 👍 posé sur un message vaut réponse : le point est acté, il n'y a plus à y revenir. Comme
+    une réponse, il acquitte tout ce qui le précède dans le fil : on réagit au dernier message
+    d'une salve, pas à chacun.
     Quand je n'entre dans la conversation que parce qu'on m'y nomme, elle ne me concerne qu'à
     partir de la mention : ce qui la précède ne m'attendait pas.
     """
-    spoke = [index for index, comment in enumerate(humans) if comment.author == me]
-    if spoke:
-        after = humans[spoke[-1] + 1 :]
-    elif from_mention:
-        # Je n'entre dans la conversation que parce qu'on m'y nomme : seuls ces messages
-        # m'attendent. Compter tout ce qui suit gonflerait le badge d'un échange qui se
-        # poursuit sans moi.
-        after = [c for c in humans if _names(c.body, me)]
-    else:
-        after = humans
-    return [c for c in after if c.author != me and not acks.intersection(c.my_reactions)]
+    marks = [index for index, c in enumerate(humans) if c.author == me or acks.intersection(c.my_reactions)]
+    after = humans[marks[-1] + 1 :] if marks else humans
+    if from_mention:
+        # Je n'ai jamais parlé dans le fil : seuls les messages qui me nomment m'attendent.
+        # Compter tout ce qui suit gonflerait le badge d'un échange qui se poursuit sans moi.
+        after = [c for c in after if _names(c.body, me)]
+    return after
 
 
 ON_CODE = "bubble.left.and.bubble.right"

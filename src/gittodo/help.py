@@ -234,8 +234,9 @@ de l'échange, et un `@toi` dans un bloc de code ou dans une citation n'en est p
 - une review demandée ou une assignation passe devant la mention : elle dit mieux ce qu'on \
 attend. La section « On m'a nommé » ne garde que ce qu'aucune conversation visible ne porte, la \
 description de la PR au premier chef
-- une réaction posée sur un message le sort du compte : un point acté n'attend plus rien. \
-`acknowledge_reactions` fixe lesquelles, 👍 et 👎 par défaut, parce qu'un refus est une réponse. \
+- une réaction posée sur un message le sort du compte : un point acté n'attend plus rien. Sur \
+un fil de code, elle acquitte aussi tout ce qui la précède, comme une réponse : réagir au \
+dernier message d'une salve suffit. `acknowledge_reactions` fixe lesquelles, 👍 et 👎 par défaut, parce qu'un refus est une réponse. \
 Pas 👀, qui dit qu'on a vu et non qu'on a tranché
 - un commentaire de review resté en brouillon n'est pas de la parole : tant que la revue n'est \
 pas soumise, GitHub ne le montre qu'à son auteur. Le compter ferait taire un fil où quelqu'un \

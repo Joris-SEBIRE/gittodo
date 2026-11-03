@@ -177,8 +177,10 @@ pour elle.
   Les gestes qui l'acquittent dépendent de l'endroit : sur un fil de code, répondre ou réagir d'un
   emoji ; dans la discussion générale, où il n'y a aucun fil à résoudre, réagir ou répondre **en
   citant** le message. Reprendre la parole sans citer n'acquitte rien : une liste
-  plate ne dit pas à quoi on répond. Seuls 👍 et 👎 comptent par défaut (`acknowledge_reactions`) :
-  un 👀 dit qu'on a vu, pas qu'on a tranché.
+  plate ne dit pas à quoi on répond. Sur un fil de code, une réaction acquitte, comme une
+  réponse, tout ce qui la précède : réagir au dernier message d'une salve suffit. Dans la
+  discussion générale, elle n'acquitte que son message. Seuls 👍 et 👎 comptent par défaut
+  (`acknowledge_reactions`) : un 👀 dit qu'on a vu, pas qu'on a tranché.
 - Résoudre un fil le sort du rouge sans rien acquitter : GitHub ne date pas la résolution, donc
   rien ne dit qu'un message l'a précédée. Les messages d'autrui que rien n'acquitte depuis ta
   dernière intervention — tout le fil si tu n'y as jamais parlé — comptent en violet, dans

@@ -419,7 +419,9 @@ retenir les autres lignes de la PR. Sur la PR d'autrui, chaque clic ouvre le plu
 encore ouvert et n'éteint que lui. Sur la tienne, seuls une réponse ou une réaction l'éteignent",
     "mention": "on t'a nommé et tu n'as pas encore répondu ; une mention dans un message \
 compte comme un message à traiter, cette section porte le reste",
-    "changes_requested": "un reviewer a posé `CHANGES_REQUESTED` sur ta PR",
+    "changes_requested": "un reviewer a posé `CHANGES_REQUESTED` sur ta PR, et tu ne lui as pas \
+redemandé sa review depuis. Redemandée, la PR passe en attente de review : GitHub garde le refus \
+jusqu'à son nouvel avis, mais la main est chez lui",
     "conflicts": "ta PR est `CONFLICTING` avec son `baseRefName`",
     "ci_failing": "`statusCheckRollup` du dernier commit de ta PR est rouge",
     "ready_to_merge": "ta PR est `APPROVED`, CI verte, `MERGEABLE`, sans message en attente",

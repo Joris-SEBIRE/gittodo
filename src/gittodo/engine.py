@@ -418,13 +418,16 @@ def _mine_items(pr: PullRequest, me: str, cfg: Config, talk: list[Item]) -> list
     verdicts = pr.verdicts()
     approved = [who for who, state in verdicts.items() if state == "APPROVED"]
     refused = [who for who, state in verdicts.items() if state == "CHANGES_REQUESTED"]
-    if refused:
+    # Lui redemander sa review lui rend la main. GitHub retire la demande dès qu'un avis est posé :
+    # une demande en cours chez qui a refusé est donc forcément postérieure au refus.
+    to_fix = [who for who in refused if who not in pr.reviewers]
+    if to_fix:
         add(
             Kind.CHANGES_REQUESTED,
-            f"{', '.join('@' + who for who in refused)} demande des changements",
-            who=tuple(refused),
+            f"{', '.join('@' + who for who in to_fix)} demande des changements",
+            who=tuple(to_fix),
             by="refusée par",
-            at=pr.verdict_at(refused, "CHANGES_REQUESTED"),
+            at=pr.verdict_at(to_fix, "CHANGES_REQUESTED"),
         )
     # Un draft en conflit n'est pas une action : c'est un choix de le laisser en draft. Le
     # conflit est signalé sur sa ligne, dans la section Draft.

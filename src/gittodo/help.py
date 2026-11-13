@@ -225,7 +225,9 @@ ouvert et n'éteint que lui. Sur la tienne, il peut s'agir de quelque chose à t
 réponse ou une réaction les éteignent, comme sur une PR clôturée. Réagir 👍 avant de résoudre \
 évite l'un comme l'autre. Ce que tu as écrit en dernier dans un fil résolu, en revanche, \
 n'attend plus personne
-- une citation désigne le message dont elle reprend le plus de lignes. Si deux messages \
+- une citation désigne le message dont elle reprend le plus de lignes. Chaque bloc de lignes \
+citées se lit à part : une réponse qui cite deux messages, l'un après l'autre, répond aux deux. \
+Si deux messages \
 correspondent autant l'un que l'autre, aucun n'est acquitté : mieux vaut deux lignes en attente \
 qu'une demande effacée par erreur. Une réaction les départage
 - être nommé met dans la conversation : un message qui écrit `@toi` attend ta réponse même si tu \

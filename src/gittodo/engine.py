@@ -102,14 +102,24 @@ def _gist(line: str) -> str:
     return " ".join((line or "").split()).lower()[:GIST_MAX]
 
 
-def _quoted(body: str) -> set[str]:
-    """Empreintes des lignes citées dans un message, chevrons retirés."""
-    quotes = set()
+def _quoted(body: str) -> list[set[str]]:
+    """Empreintes des lignes citées dans un message, chevrons retirés, bloc par bloc.
+
+    Un bloc, ce sont des lignes citées qui se suivent : c'est ce que GitHub écrit à chaque
+    « Quote reply ». Une réponse qui cite deux messages répond aux deux.
+    """
+    blocks: list[set[str]] = []
+    current: set[str] | None = None
     for line in (body or "").splitlines():
         if found := QUOTE.match(line):
+            if current is None:
+                current = set()
+                blocks.append(current)
             if gist := _gist(found.group(1)):
-                quotes.add(gist)
-    return quotes
+                current.add(gist)
+        else:
+            current = None
+    return [block for block in blocks if block]
 
 
 def _quoted_target(quotes: set[str], earlier: list[tuple[int, Comment]]) -> int | None:
@@ -146,8 +156,8 @@ def _unanswered(humans: list[Comment], me: str, acks: set[str], only_named: bool
     for index, comment in enumerate(humans):
         if comment.author != me:
             continue
-        if quotes := _quoted(comment.body):
-            earlier = [(position, c) for position, c in enumerate(humans[:index]) if c.author != me]
+        earlier = [(position, c) for position, c in enumerate(humans[:index]) if c.author != me]
+        for quotes in _quoted(comment.body):
             if (target := _quoted_target(quotes, earlier)) is not None:
                 answered.add(target)
     return [

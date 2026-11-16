@@ -299,15 +299,20 @@ la ligne, et reste grise sur une ligne informative — « 11 » messages sans re
 comme les messages qui attendent ta réponse, avec les mêmes glyphes, mais rien n'est attendu de \
 toi et le nombre ne va dans aucun badge. État de la PR, sur toute ligne de PR : le glyphe, le \
 mot et la couleur que GitHub lui donne, vert `ouverte`, gris `draft`, violet `mergée` ou rouge \
-`fermée`, sans nombre, parce qu'il dit où en est la PR et non ce qu'il reste à faire. Drapeau \
+`fermée`, sans nombre, parce qu'il dit où en est la PR et non ce qu'il reste à faire. `prête`, \
+en vert, remplace `ouverte` quand tu peux la merger : review du code owner rendue, contrôles \
+obligatoires passés, sans conflit ni refus — une review que tu peux contourner, comme celle du \
+front, n'est pas attendue. Drapeau \
 d'état : gris, sans nombre.
 
-Le bouclier, lui, n'est pas une pastille : il se dessine sur la troisième ligne, devant le nom \
-de la branche, parce qu'une review obligatoire protège la branche visée et non la PR. Il dit \
-qu'une demande posée par CODEOWNERS attend toujours son avis, et qu'on ne peut pas la \
-contourner. C'est la seule obligation de review qu'un token sans droits d'administration puisse \
-voir : `branchProtectionRule` lui est refusée, et `reviewDecision` reste vide. L'infobulle nomme \
-celui dont la review est attendue.
+Le bouclier jaune, lui, n'est pas une pastille : il se dessine sur la troisième ligne, devant le nom \
+de la branche, parce qu'une review obligatoire protège la branche visée et non la PR. Il marque \
+toute PR, ouverte ou clôturée, soumise à la review d'un code owner : une règle de la branche \
+visée l'exige (`requireCodeOwnerReview`), et la PR touche un fichier que CODEOWNERS attribue. \
+Plein tant qu'un fichier possédé n'a l'approbation d'aucun de ses propriétaires, vide et coché \
+une fois que chacun l'a. GitHub ne le dit pas lui-même — ses demandes `asCodeOwner` disparaissent \
+dès qu'un avis est rendu, et `reviewDecision` reste vide sans protection de branche classique : \
+l'app rejoue CODEOWNERS sur les fichiers modifiés, une fois par commit.
 
 L'étiquette rouge `conflit` marque un `mergeable: CONFLICTING`. Le survol détaille le compte.
 
@@ -426,7 +431,16 @@ redemandé sa review depuis. Redemandée, la PR passe en attente de review : Git
 jusqu'à son nouvel avis, mais la main est chez lui",
     "conflicts": "ta PR est `CONFLICTING` avec son `baseRefName`",
     "ci_failing": "`statusCheckRollup` du dernier commit de ta PR est rouge",
-    "ready_to_merge": "ta PR est `APPROVED`, CI verte, `MERGEABLE`, sans message en attente",
+    "ready_to_merge": "ta PR n'a pas de refus en cours, son dernier commit a passé sa CI et ses \
+contrôles obligatoires, aucun message n'attend ta réponse, et GitHub autorise le merge \
+(`mergeStateStatus` à `CLEAN` ou `HAS_HOOKS` : review du code owner et absence de conflit \
+compris) — ou ne le bloque que sur une review que tu peux contourner, comme l'approbation du \
+front (`current_user_can_bypass` du ruleset, relu chaque heure)",
+    "merge_blocked": "ta PR est approuvée sans refus en cours, sa CI est verte ou absente, sans \
+conflit ni message qui attend ta réponse, mais GitHub bloque son merge et c'est à toi d'agir : un \
+contrôle que les règles de la branche visée exigent n'a jamais tourné sur son dernier commit — \
+`e2e deployment` sur backend, lancé par `/run-e2e` — ou aucune review n'est plus demandée alors \
+qu'il en manque une, celle d'un code owner qui n'a que commenté par exemple",
     "no_reviewer": "ta PR est ouverte, aucun `reviewRequests`, aucune `reviews`, rien qui la bloque",
     "assigned": "`assignee:` toi sur la PR d'un autre",
     "waiting_review": "ta PR est chez ses `reviewRequests`, rien d'ouvert de ton côté",

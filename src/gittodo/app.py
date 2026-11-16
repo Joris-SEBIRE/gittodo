@@ -67,7 +67,7 @@ from . import help as manual
 from .avatars import BAR_SIZE, SIZE as AVATAR_SIZE, Avatars
 from .chimes import Bell
 from .config import CONFIG_PATH, Config
-from .engine import build_items, now, summarize, summarize_closed, unread_resolved
+from .engine import OWNERS_AWAITED, build_items, now, summarize, summarize_closed, unread_resolved
 from .formatting import ago, countdown, join, since, spell, truncate
 from .github import KEYCHAIN_SERVICE, GitHub, GitHubError, covered, service_status, signature_of, store_token
 from .models import GROUPS, ORDER, Item, Kind, Person, Snapshot
@@ -144,7 +144,8 @@ SOURCES = {
     "mentions": ("sujets des mentions", "une mention fermée peut rester affichée"),
     "branches": ("branches distantes", "les branches peuvent être périmées"),
     "closed": ("suivi des PR clôturées", "une clôture ou un message tardif peut manquer"),
-    "code_owners": ("règles CODEOWNERS", "le bouclier peut manquer sur un draft"),
+    "code_owners": ("règles CODEOWNERS", "le bouclier peut manquer"),
+    "closed_owners": ("règles CODEOWNERS des clôturées", "le bouclier peut manquer sur une PR close"),
     "people": ("annuaire de l'organisation", "« voir en tant que » est incomplet"),
 }
 # Triangle d'avertissement posé à la place de la pastille de comptage : le rouge de la pastille
@@ -738,7 +739,7 @@ def _rich(
     route: str = "",
     tag: str = "",
     tint: str | None = None,
-    guarded: bool = False,
+    guarded: str = "",
 ):
     """Ligne complète : titre, ligne de métadonnées, puis trajet de branche.
 
@@ -769,11 +770,12 @@ def _rich(
     if route or guarded:
         text.appendAttributedString_(_run("\n", ROUTE_FONT, paragraph=paragraph))
         # Le bouclier tient la ligne du trajet, parce qu'une review obligatoire protège la
-        # branche visée et non la PR. Il y prend le gris des drapeaux, un ton plus franc que
-        # celui du trajet, sinon il disparaîtrait dans le plus pâle des gris du menu.
+        # branche visée et non la PR. Jaune, sinon il se perdait dans le gris du trajet : plein
+        # tant que le code owner n'a pas approuvé, vide et coché une fois qu'il l'a fait.
         if guarded:
+            shield = "shield.fill" if guarded == OWNERS_AWAITED else "checkmark.shield"
             text.appendAttributedString_(
-                _chip_run((("shield", ""),), font=ROUTE_FONT, glyph=GLYPH_ROUTE, gap=" ")
+                _chip_run(((shield, "", "systemYellowColor"),), font=ROUTE_FONT, glyph=GLYPH_ROUTE, gap=" ")
             )
         text.appendAttributedString_(
             _run(
@@ -955,6 +957,13 @@ class GitTodoApp(NSObject):
             for closure in self.closures
             if closure.pr.id not in read and (closure.at >= since or closure.pr.updated_at >= since)
         ]
+        # Le bouclier vaut aussi pour une PR close : rendue ou non, la review de code owner se
+        # lit sur ses fichiers. Lus une fois par PR, ils ne coûtent qu'à la première lecture.
+        try:
+            found = self.client.with_closure_owners(found)
+            self.clear_incident("closed_owners")
+        except GitHubError as exc:
+            self.note_incident("closed_owners", exc)
         self.closures, self.closures_at, self.closures_limit = found, now(), limit
         return found
 

@@ -52,11 +52,17 @@ fragment PR on PullRequest {
   headRefName baseRefName
   repository { nameWithOwner }
   author { __typename login avatarUrl(size: 64) }
-  reviewDecision mergeable
+  reviewDecision mergeable mergeStateStatus
+  baseRef { refUpdateRule { requiredStatusCheckContexts } rules(first:10) { nodes {
+    type repositoryRuleset { databaseId } parameters {
+      ... on RequiredStatusChecksParameters { requiredStatusChecks { context } }
+      ... on PullRequestParameters {
+        requiredApprovingReviewCount requireCodeOwnerReview requireLastPushApproval requiredReviewThreadResolution } } } } }
   reviewRequests(first:20){ nodes { asCodeOwner requestedReviewer {
     __typename ... on User{login avatarUrl(size: 64)} ... on Team{slug avatarUrl(size: 64)} } } }
   reviews(last:50){ totalCount nodes { author { login avatarUrl(size: 64) } state submittedAt } }
-  commits(last:1){ nodes { commit { committedDate statusCheckRollup { state } } } }
+  commits(last:1){ nodes { commit { committedDate statusCheckRollup { state
+    contexts(first:30){ nodes { ... on CheckRun { name } ... on StatusContext { context } } } } } } }
   reviewThreads(first:30){ totalCount pageInfo { endCursor } nodes { ...Thread } }
   comments(last:15){ totalCount nodes { author { __typename login avatarUrl(size: 64) } createdAt url body
     reactionGroups { content viewerHasReacted } } }
@@ -170,6 +176,8 @@ fragment Fin on PullRequest {
   repository { nameWithOwner }
   author { __typename login avatarUrl(size: 64) }
   mergedBy { login avatarUrl(size: 64) }
+  latestOpinionatedReviews(first:20){ nodes { author { login avatarUrl(size: 64) } state submittedAt } }
+  baseRef { rules(first:10) { nodes { type parameters { ... on PullRequestParameters { requireCodeOwnerReview } } } } }
   timelineItems(last: 1, itemTypes: [CLOSED_EVENT]) {
     nodes { ... on ClosedEvent { createdAt actor { login avatarUrl(size: 64) } } }
   }

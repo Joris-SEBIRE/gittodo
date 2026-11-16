@@ -133,15 +133,32 @@ pour elle.
   rouge pour ce qu'il reste à faire, violet pour le suivi des PR clôturées et des fils résolus,
   grise sur une ligne informative — le nombre dit alors combien, pas quoi faire. État de la PR,
   sur toute ligne de PR : le glyphe, le mot et la couleur de GitHub, vert `ouverte`, gris `draft`,
-  violet `mergée` ou rouge `fermée`, sans nombre. Drapeau d'état : gris, sans nombre.
+  violet `mergée` ou rouge `fermée`, sans nombre. `prête`, en vert, remplace `ouverte` quand tu
+  peux merger la PR (`mergeStateStatus` à `CLEAN`) : review du code owner rendue, contrôles
+  obligatoires passés, sans conflit ni refus. Une review que tu peux contourner au merge — celle
+  du front, que le ruleset « dev can bypass review » exige — n'est pas attendue : seul le REST du
+  ruleset le dit (`current_user_can_bypass`), relu chaque heure. Drapeau d'état : gris, sans nombre.
+- « Mes PR à merger » repose sur ce même verdict de GitHub. Une PR approuvée et verte que GitHub
+  bloque encore passe dans « Mes PR approuvées mais bloquées » quand c'est à toi d'agir : un
+  contrôle obligatoire jamais lancé sur son dernier commit — `e2e deployment` sur backend, par
+  `/run-e2e` — ou une review manquante sans demande en cours, celle d'un code owner qui n'a que
+  commenté par exemple.
 - Le délai « depuis X » prend la couleur de la pastille de la ligne, et reste gris quand la ligne
   ne compte rien.
-- Le bouclier, devant le nom de la branche, marque une review obligatoire encore en attente :
-  CODEOWNERS l'a demandée, elle ne peut pas être contournée. Il tient cette ligne parce que la
-  protection porte sur la branche visée. L'infobulle dit de qui la review est attendue.
-- Après un merge sur sa branche cible, GitHub recalcule si une PR est en conflit et ne répond rien
-  le temps du calcul. La PR garde alors son dernier état connu jusqu'au verdict : sans cela, « Mes
-  PR en conflit » et « Mes PR à merger » clignotaient à chaque merge sur main.
+- Le bouclier jaune, devant le nom de la branche, marque une PR, ouverte ou clôturée, soumise à la
+  review d'un code owner : une règle de la branche visée l'exige, et la PR touche un fichier que
+  CODEOWNERS attribue. Plein tant qu'un fichier possédé n'a l'approbation d'aucun de ses
+  propriétaires, vide et coché une fois que chacun l'a. Il tient cette ligne parce que la
+  protection porte sur la branche visée. L'app rejoue CODEOWNERS sur les fichiers modifiés, une
+  fois par commit : GitHub retire sa demande dès qu'un avis est rendu, et ne dit nulle part si un
+  code owner a approuvé.
+- Une review que tu peux contourner n'empêche pas `prête`, même quand une règle exige un code
+  owner : si la PR ne touche aucun fichier possédé, cette exigence est tenue d'office. C'est le
+  cas des PR d'integrations qui ne touchent ni `/framework` ni les autres chemins de paulfab.
+- Après un merge sur sa branche cible, GitHub recalcule si une PR est en conflit, et si elle peut
+  être mergée, et ne répond rien le temps du calcul. La PR garde alors son dernier état connu
+  jusqu'au verdict : sans cela, « Mes PR en conflit » et « Mes PR à merger » clignotaient à chaque
+  merge sur main.
 - Une PR ne paraît qu'une fois, dans sa catégorie la plus forte — celle qui vient le plus haut
   dans le menu. Une PR en conflit dont un message attend ta réponse est *une* PR à traiter, pas
   deux : elle se lit dans « On attend ma réponse », et son étiquette rouge « conflit » l'y suit.

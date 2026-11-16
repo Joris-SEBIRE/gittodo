@@ -22,6 +22,7 @@ class Kind(str, Enum):
     CHANGES_REQUESTED = "changes_requested"
     CONFLICTS = "conflicts"
     CI_FAILING = "ci_failing"
+    MERGE_BLOCKED = "merge_blocked"
     READY_TO_MERGE = "ready_to_merge"
     NO_REVIEWER = "no_reviewer"
     ASSIGNED = "assigned"
@@ -60,6 +61,7 @@ GROUPS: dict[Kind, Group] = {
     Kind.CHANGES_REQUESTED: Group(Kind.CHANGES_REQUESTED, "Mes PR à corriger", "arrow.uturn.left", True, True),
     Kind.CONFLICTS: Group(Kind.CONFLICTS, "Mes PR en conflit", "arrow.triangle.branch", True, True),
     Kind.CI_FAILING: Group(Kind.CI_FAILING, "Mes PR avec CI rouge", "xmark.octagon", True, True),
+    Kind.MERGE_BLOCKED: Group(Kind.MERGE_BLOCKED, "Mes PR approuvées mais bloquées", "lock", True),
     Kind.READY_TO_MERGE: Group(Kind.READY_TO_MERGE, "Mes PR à merger", "checkmark.seal", True),
     Kind.NO_REVIEWER: Group(Kind.NO_REVIEWER, "Mes PR sans reviewer", "person.badge.plus", True),
     # Un fil résolu est clos comme une PR fermée : ce qu'on y écrit après coup compte en violet,
@@ -183,6 +185,20 @@ class Review:
 
 
 @dataclass(frozen=True)
+class Rule:
+    """Une règle de la branche visée, telle que GitHub l'applique à la PR."""
+
+    kind: str
+    ruleset: int = 0
+    approvals: int = 0
+    code_owner: bool = False
+    # Une exigence de review que l'app ne vérifie pas : dernier push approuvé, fils résolus.
+    unchecked: bool = False
+    # Je peux la contourner au merge de la PR : GitHub me propose alors de merger sans elle.
+    bypass: bool = False
+
+
+@dataclass(frozen=True)
 class Thread:
     id: str
     resolved: bool
@@ -219,6 +235,16 @@ class PullRequest:
     # Parmi eux, ceux que CODEOWNERS désigne : leur review est obligatoire pour merger, et la
     # demande reste posée tant qu'ils n'ont pas rendu leur avis.
     code_owners: tuple[str, ...] = ()
+    # Le verdict de GitHub sur le merge (`mergeStateStatus`) : `CLEAN` quand toutes les règles
+    # de la branche visée sont tenues, review du code owner et contrôles obligatoires compris.
+    merge_state: str | None = None
+    # Contrôles que les règles de la branche visée exigent et qui n'ont pas tourné sur le dernier
+    # commit : GitHub bloque le merge, et la CI qui a tourné reste verte.
+    missing_checks: tuple[str, ...] = ()
+    rules: tuple[Rule, ...] = ()
+    # Propriétaires CODEOWNERS des fichiers de la PR, fichier par fichier, l'auteur exclu : il
+    # suffit que l'un d'eux approuve pour chaque fichier. `None` tant qu'on n'a pas pu les lire.
+    owner_groups: tuple[tuple[str, ...], ...] | None = None
     last_commit_at: datetime | None = None
     sources: set[str] = field(default_factory=set)
     # Photo par login, alimentée par l'auteur, les reviewers et les messages : de quoi mettre
@@ -274,9 +300,9 @@ class Item:
     hint: str = ""
     # « branche → cible », affiché sous les métadonnées.
     route: str = ""
-    # Une review obligatoire manque : le bouclier se dessine devant le trajet, la protection
-    # portant sur la branche visée.
-    guarded: bool = False
+    # Review de code owner exigée par la branche visée : « attendue », « rendue », ou rien. Le
+    # bouclier se dessine devant le trajet, la protection portant sur la branche visée.
+    guarded: str = ""
     # Étiquette dessinée en tête des métadonnées, pour un état qui doit sauter aux yeux.
     tag: str = ""
     # None = l'urgence par défaut de la catégorie.

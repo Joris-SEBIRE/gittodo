@@ -21,11 +21,17 @@ from .models import GROUPS, ORDER, Closure, Comment, Item, Kind, PullRequest, pa
 
 CI_BROKEN = {"FAILURE", "ERROR"}
 CI_OK = {"SUCCESS", None}
+MERGE_READY = {"CLEAN", "HAS_HOOKS"}
+# Règles qui ne bloquent pas un merge de PR : les contrôles obligatoires, eux, se lisent sur
+# le dernier commit, où ils sont exigés qu'on puisse les contourner ou non.
+HARMLESS_RULES = {"DELETION", "NON_FAST_FORWARD", "CREATION", "REQUIRED_STATUS_CHECKS"}
+OWNERS_AWAITED, OWNERS_DONE = "attendue", "rendue"
 MAX_CHIPS = 5
 # Les quatre états d'une PR, dans le glyphe, le mot et la couleur que GitHub leur donne : le vert
 # de l'ouverture, le gris du draft, le violet du merge, le rouge de la fermeture sans merge.
 PR_STATUS = {
     "OPEN": ("arrow.triangle.pull", "ouverte", "githubOpenColor"),
+    "READY": ("checkmark.circle", "prête", "githubOpenColor"),
     "DRAFT": ("pencil.line", "draft", "githubDraftColor"),
     "MERGED": ("arrow.triangle.merge", "mergée", "githubMergedColor"),
     "CLOSED": ("xmark.circle", "fermée", "githubClosedColor"),
@@ -33,7 +39,78 @@ PR_STATUS = {
 
 
 def _status(pr: PullRequest) -> tuple[str, str, str]:
-    return PR_STATUS["DRAFT" if pr.state == "OPEN" and pr.is_draft else pr.state]
+    if pr.state == "OPEN" and pr.is_draft:
+        return PR_STATUS["DRAFT"]
+    return PR_STATUS["READY" if _ready(pr) else pr.state]
+
+
+def _ready(pr: PullRequest) -> bool:
+    """Prête à merger : sans refus en cours, GitHub autorise le merge, ou ne le bloque que sur
+    une review que je peux contourner.
+
+    Le verdict de GitHub tient toutes les règles de la branche visée — review du code owner,
+    contrôles obligatoires, conflits. Pendant un recalcul, c'est le verdict d'avant le dernier
+    push qui est retenu : ce que montre le dernier commit lui-même, CI et contrôles obligatoires,
+    passe donc devant. Un contrôle obligatoire est de la CI : il reste exigé, contournable ou non.
+    """
+    if pr.state != "OPEN" or pr.is_draft or pr.ci_state not in CI_OK or pr.missing_checks:
+        return False
+    if "CHANGES_REQUESTED" in pr.verdicts().values():
+        return False
+    return pr.merge_state in MERGE_READY or (
+        pr.merge_state == "BLOCKED" and pr.mergeable == "MERGEABLE" and _review_bypassed(pr)
+    )
+
+
+def _review_bypassed(pr: PullRequest) -> bool:
+    """GitHub ne bloque que sur une review que je peux contourner : toute autre règle est tenue.
+
+    C'est le cas du front, où un ruleset exige une approbation que les devs peuvent contourner
+    au merge. Une règle qu'on ne sait pas évaluer — review de code owner, fils à résoudre, type
+    inconnu, protection classique — laisse le verdict à GitHub.
+    """
+    approvals = sum(1 for state in pr.verdicts().values() if state == "APPROVED")
+    owners = _code_owners(pr) == OWNERS_DONE or (pr.owner_groups is not None and not _code_owners(pr))
+    return any(rule.bypass and rule.kind == "PULL_REQUEST" for rule in pr.rules) and all(
+        rule.bypass
+        or rule.kind in HARMLESS_RULES
+        or (
+            rule.kind == "PULL_REQUEST" and approvals >= rule.approvals
+            and (owners or not rule.code_owner) and not rule.unchecked
+        )
+        for rule in pr.rules
+    )
+
+
+def _code_owners(pr: PullRequest) -> str:
+    """Où en est la review de code owner : rien quand aucune règle de la branche visée ne l'exige
+    ou que la PR ne touche aucun fichier possédé, attendue tant qu'un fichier possédé n'a
+    l'approbation d'aucun de ses propriétaires, rendue ensuite — PR ouverte ou clôturée.
+
+    Faute d'avoir pu rejouer CODEOWNERS, les demandes `asCodeOwner` de GitHub tranchent.
+    """
+    if not any(rule.code_owner for rule in pr.rules):
+        return ""
+    if pr.owner_groups is None:
+        return OWNERS_AWAITED if pr.code_owners and pr.state == "OPEN" else ""
+    if not pr.owner_groups:
+        return ""
+    approved = {who for who, state in pr.verdicts().items() if state == "APPROVED"}
+    return OWNERS_DONE if all(approved.intersection(group) for group in pr.owner_groups) else OWNERS_AWAITED
+
+
+def _blocker(pr: PullRequest) -> str:
+    """Ce qui bloque encore le merge d'une PR approuvée et verte, quand personne n'est sollicité.
+
+    Un contrôle obligatoire jamais lancé se nomme. Sans demande de review en cours, un `BLOCKED`
+    tient à une review que GitHub ne compte pas, celle d'un code owner qui n'a que commenté par
+    exemple : la redemander est à moi. Une demande encore posée, elle, attend son reviewer.
+    """
+    if pr.missing_checks:
+        return f"GitHub attend encore {', '.join(pr.missing_checks)}, jamais passé sur le dernier commit"
+    if pr.merge_state == "BLOCKED" and not pr.reviewers:
+        return "GitHub bloque encore le merge sans review demandée : il manque sans doute celle d'un code owner"
+    return ""
 
 
 def _humans(comments: tuple[Comment, ...], ignored: set[str]) -> list[Comment]:
@@ -259,10 +336,7 @@ def _item(
         weight=sum(number for _, number in counted) if compte else 0,
         chips=(numbered + status + flags)[: MAX_CHIPS + len(status)],
         route=f"{pr.head} → {pr.base}" if pr.head and pr.base else "",
-        # CODEOWNERS a posé une demande de review, et elle reste posée tant que l'avis n'est pas
-        # rendu : c'est la seule obligation de review qu'un token sans droits d'admin puisse
-        # voir, la règle de protection de branche n'étant lisible que par un administrateur.
-        guarded=bool(pr.code_owners),
+        guarded=_code_owners(pr),
         tag="conflit" if conflict else "",
         **extra,
     )
@@ -446,10 +520,25 @@ def _mine_items(pr: PullRequest, me: str, cfg: Config, talk: list[Item]) -> list
     if live and pr.ci_state in CI_BROKEN:
         add(Kind.CI_FAILING, "la CI du dernier commit est rouge")
     # Merger avant d'avoir répondu aux messages n'aurait pas de sens.
-    if live and approved and not refused and not pending_talk and pr.ci_state in CI_OK and pr.mergeable == "MERGEABLE":
+    if live and _ready(pr) and not pending_talk:
         add(
             Kind.READY_TO_MERGE,
-            f"approuvée par {', '.join('@' + who for who in approved)}, CI verte, sans conflit",
+            (f"approuvée par {', '.join('@' + who for who in approved)}" if approved else "sans approbation")
+            + (" : GitHub autorise le merge" if pr.merge_state in MERGE_READY else
+               " : la review exigée est contournable, GitHub te laisse merger sans attendre"),
+            who=tuple(approved),
+            by="approuvée par",
+            at=pr.verdict_at(approved, "APPROVED"),
+        )
+    # Approuvée et verte mais bloquée : sans cette ligne, elle n'apparaîtrait plus que comme
+    # « reviewée », alors que le prochain geste est à moi. Un draft, lui, se bloque de lui-même.
+    elif (
+        not pr.is_draft and approved and not refused and not pending_talk
+        and pr.ci_state in CI_OK and pr.mergeable == "MERGEABLE" and (blocker := _blocker(pr))
+    ):
+        add(
+            Kind.MERGE_BLOCKED,
+            f"approuvée, CI verte : {blocker}",
             who=tuple(approved),
             by="approuvée par",
             at=pr.verdict_at(approved, "APPROVED"),

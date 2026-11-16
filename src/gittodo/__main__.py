@@ -55,6 +55,10 @@ def dump(argv: list[str]) -> int:
                 truncated = truncated + limit
             except GitHubError as exc:
                 print(f"(suivi des clôturées indisponible : {exc})")
+            try:
+                closures = client.with_closure_owners(closures)
+            except GitHubError as exc:
+                print(f"(règles CODEOWNERS des clôturées indisponibles : {exc})")
     except GitHubError as exc:
         print(f"Erreur : {exc}", file=sys.stderr)
         return 1
@@ -75,7 +79,7 @@ def dump(argv: list[str]) -> int:
         for item in group:
             pill = f"[{item.weight}] " if item.weight else "[ ] "
             chips = "  ".join(f"{name}{' ' + label if label else ''}" for name, label, *_ in item.chips)
-            chips = f"shield  {chips}" if item.guarded else chips
+            chips = f"shield:{item.guarded}  {chips}" if item.guarded else chips
             print(f"    {pill}{item.title}\n      {item.detail}\n      {chips}\n      {item.url}")
     return 0
 

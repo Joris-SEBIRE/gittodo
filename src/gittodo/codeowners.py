@@ -74,14 +74,16 @@ def _regex(pattern: str) -> re.Pattern:
     return re.compile(f"^{lead}{''.join(body)}{tail}$")
 
 
-def owners(paths, rules) -> tuple[str, ...]:
-    """Propriétaires des fichiers donnés : le dernier motif qui correspond décide, par fichier."""
+def groups(paths, rules) -> tuple[tuple[str, ...], ...]:
+    """Propriétaires de chaque fichier possédé, sans doublon : le dernier motif qui correspond
+    décide. Un fichier se contente de l'approbation d'un seul de ses propriétaires."""
     compiled = [(_regex(pattern), who) for pattern, who in rules]
-    found: set[str] = set()
+    found: set[tuple[str, ...]] = set()
     for path in paths:
         matched: tuple[str, ...] = ()
         for regex, who in compiled:
             if regex.match(path):
                 matched = who
-        found.update(matched)
+        if matched:
+            found.add(tuple(sorted(matched)))
     return tuple(sorted(found))

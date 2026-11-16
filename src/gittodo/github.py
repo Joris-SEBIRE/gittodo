@@ -16,7 +16,7 @@ from pathlib import Path
 
 from . import codeowners
 from .config import CONFIG_PATH, Config
-from .models import Branch, Closure, Comment, Person, PullRequest, Review, Thread, parse_ts
+from .models import Branch, Closure, Comment, Person, PullRequest, Review, Rule, Thread, parse_ts
 from .queries import (
     CLOSED_NODES_QUERY,
     CLOSED_QUERY,
@@ -47,14 +47,22 @@ THREAD_PAGES = 3
 # Pages lues par recherche de clôturées, cinquante PR chacune : un mois d'activité en compte une
 # soixantaine, et ce qui dépassait la première page n'était jamais lu après un redémarrage.
 CLOSED_PAGES = 4
+# Un droit de contournement change rarement : le relire chaque heure suffit.
+BYPASS_TTL = timedelta(hours=1)
+BYPASS_RETRY = timedelta(minutes=5)
 EPOCH = datetime.fromtimestamp(0, tz=timezone.utc)
 # Boîte des non-lues : l'API plafonne à 50 par page quoi qu'on demande, et dix pages
 # couvrent les comptes très bruyants (mesuré : 424 non lues, la seule mention en page 6).
 NOTIFICATION_PAGE_SIZE = 50
 NOTIFICATION_PAGES = 10
-# Chemins modifiés lus par PR pour rejouer CODEOWNERS : au-delà, une PR est de toute façon
-# trop large pour qu'un propriétaire ne soit pas déjà concerné.
+# Chemins modifiés lus par page pour rejouer CODEOWNERS : GitHub les trie par chemin, et un
+# fichier possédé peut venir après le centième.
 OWNER_FILES = 100
+# PR par requête d'alias, et au plus par appel : une centaine de clôturées à la première lecture
+# tient en quatre lots, la suite attend l'appel suivant. Pages de fichiers lues au plus par PR.
+OWNER_BATCH = 25
+OWNER_BUDGET = 100
+OWNER_PAGES = 10
 # Lots d'alias : le test « a-t-elle eu une PR ? » est léger, la résolution du dernier commit
 # l'est beaucoup moins et dépasse les limites de ressources si le lot est gros.
 BRANCH_PR_BATCH = 120
@@ -154,6 +162,13 @@ class GitHub:
         self.viewer_face = ""
         # Dernier état de fusion connu par PR, conflit ou non : de quoi traverser un `UNKNOWN`.
         self.mergeable: dict[str, str] = {}
+        self.merge_states: dict[str, str] = {}
+        # Par (dépôt, ruleset) : puis-je le contourner (None : illisible), et quand on l'a lu.
+        self.bypass: dict[tuple[str, int], tuple[bool | None, datetime]] = {}
+        # Par (PR, dernier commit, branche visée) : les propriétaires de ses fichiers, fichier par fichier.
+        self.owner_groups: dict[tuple, tuple[tuple[str, ...], ...]] = {}
+        # Par (dépôt, commit) : les règles CODEOWNERS de ce commit.
+        self.codeowners: dict[tuple[str, str], tuple] = {}
         # PR de la dernière lecture et leurs sources, pour le même compte et les mêmes recherches :
         # une source qu'une liste partielle perd se vérifie sur la PR. Puis, par PR et par source
         # invérifiable, ses lectures manquées d'affilée.
@@ -402,10 +417,14 @@ class GitHub:
         # Après un merge sur sa branche cible, GitHub recalcule la fusionnabilité de chaque PR et
         # répond `UNKNOWN` le temps du calcul : sans mémoire, « Mes PR en conflit » s'éteignait
         # puis revenait à chaque merge sur main. Le dernier état connu tient jusqu'au verdict.
+        # Même chose pour le verdict de merge, que le même recalcul rend `UNKNOWN`.
         for pr in prs.values():
             if pr.mergeable == "UNKNOWN":
                 pr.mergeable = self.mergeable.get(pr.id, pr.mergeable)
+            if pr.merge_state == "UNKNOWN":
+                pr.merge_state = self.merge_states.get(pr.id, pr.merge_state)
         self.mergeable = {pr.id: pr.mergeable for pr in prs.values() if pr.mergeable in ("CONFLICTING", "MERGEABLE")}
+        self.merge_states = {pr.id: pr.merge_state for pr in prs.values() if pr.merge_state not in (None, "UNKNOWN")}
         kept = {source: sum(1 for pr in prs.values() if source in pr.sources) for source in SEARCHES}
         truncated = [
             f"{source} ({count} résultats, {kept[source]} lus)"
@@ -423,7 +442,33 @@ class GitHub:
         if pages:
             truncated.append(f"fils non lus sur {', '.join(sorted(prs[pr_id].slug for pr_id in pages)[:3])}")
         self.viewer_face = viewer.get("avatarUrl") or ""
+        if not self.cfg.view_as:
+            for pr in prs.values():
+                pr.rules = tuple(replace(rule, bypass=self.bypassable(pr.repo, rule.ruleset)) for rule in pr.rules)
+            if unread := sorted({repo for (repo, _), (allowed, _) in self.bypass.items() if allowed is None}):
+                truncated.append(f"droits de contournement illisibles sur {', '.join(unread)}")
         return list(prs.values()), viewer["login"], rate, truncated
+
+    def bypassable(self, repo: str, ruleset: int) -> bool:
+        """Puis-je contourner ce ruleset au merge d'une PR ? Relu au plus une fois par heure.
+
+        GraphQL ne le dit pas : seul le ruleset lu en REST porte `current_user_can_bypass`, et
+        ce droit est celui du token, d'où rien en « voir en tant que ». Une lecture qui échoue
+        vaut un refus — on ne contourne pas une règle qu'on n'a pas pu lire — retenu BYPASS_RETRY
+        seulement : la relire à chaque cycle coûterait un appel par PR et par règle.
+        """
+        if not ruleset:
+            return False
+        known = self.bypass.get((repo, ruleset))
+        if known and datetime.now(timezone.utc) - known[1] < (BYPASS_TTL if known[0] is not None else BYPASS_RETRY):
+            return bool(known[0])
+        try:
+            mode = (self._request(f"/repos/{repo}/rulesets/{ruleset}") or {}).get("current_user_can_bypass")
+            allowed = mode in ("always", "pull_requests_only", "exempt")
+        except GitHubError:
+            allowed = None
+        self.bypass[(repo, ruleset)] = (allowed, datetime.now(timezone.utc))
+        return bool(allowed)
 
     def holds(self, pr: PullRequest, source: str, me: str) -> bool | None:
         """La PR relève-t-elle toujours de cette recherche ? `None` quand elle ne permet pas d'en juger.
@@ -787,63 +832,113 @@ class GitHub:
                     found.append(closure)
         return found
 
-    def fetch_code_owners(self, prs: list[PullRequest]) -> dict[str, tuple[str, ...]]:
-        """Propriétaires dont la review sera obligatoire, pour les PR où GitHub ne l'a pas dit.
+    def fetch_owner_groups(self, prs: list[PullRequest]) -> dict[str, tuple[tuple[str, ...], ...]]:
+        """Propriétaires CODEOWNERS des fichiers de chaque PR, fichier par fichier, l'auteur exclu.
 
-        GitHub ne pose ses demandes `asCodeOwner` qu'à l'ouverture d'une PR : sur un draft, la
-        liste est vide alors que la review sera bel et bien exigée. On rejoue donc la règle du
-        dépôt sur les fichiers modifiés. Là où GitHub s'est prononcé, on ne le refait pas : sa
-        liste est la vérité, puisqu'elle sait aussi qui a déjà rendu son avis.
+        GitHub ne dit ni quels fichiers ont un propriétaire, ni si l'un d'eux a approuvé : ses
+        demandes `asCodeOwner` disparaissent dès qu'un avis est rendu, et n'existent pas encore
+        sur un draft. On rejoue donc la règle sur les fichiers modifiés, avec le CODEOWNERS du
+        commit de base de la PR — celui qui valait pour elle, même close depuis longtemps.
+        Seulement là où une règle de la branche visée exige un code owner.
 
-        Mesuré à 1 point pour une douzaine de PR et leurs dépôts : le fichier de règles et les
-        chemins modifiés tiennent dans la même requête d'alias.
+        Le résultat est retenu par PR, dernier commit et branche visée : les fichiers ne changent
+        qu'à un push ou à un changement de cible. Une PR dont les fichiers ne se lisent pas en
+        entier reste inconnue, plutôt que de passer pour ne rien toucher. Au plus OWNER_BUDGET PR
+        par appel : les autres attendent le suivant, sans retarder un cycle de plusieurs lots.
         """
-        if not prs:
-            return {}
-        repos = sorted({pr.repo for pr in prs})
-        blocks = []
-        for index, repo in enumerate(repos):
-            owner, _, name = repo.partition("/")
-            candidates = " ".join(
-                f'c{rank}: object(expression:{json.dumps("HEAD:" + path)}) {{ ... on Blob {{ text }} }}'
-                for rank, path in enumerate(codeowners.PATHS)
+        wanted = [pr for pr in prs if any(rule.code_owner for rule in pr.rules)]
+        missing = [pr for pr in wanted if _owner_key(pr) not in self.owner_groups][:OWNER_BUDGET]
+        for start in range(0, len(missing), OWNER_BATCH):
+            batch = missing[start : start + OWNER_BATCH]
+            data = self.graphql(
+                "query {\n" + "\n".join(
+                    f"  p{index}: repository(owner:{json.dumps(pr.repo.partition('/')[0])}, "
+                    f"name:{json.dumps(pr.repo.partition('/')[2])}) {{ pullRequest(number:{pr.number}) {{ "
+                    f"baseRefOid files(first:{OWNER_FILES}) {{ pageInfo {{ hasNextPage endCursor }} nodes {{ path }} }} }} }}"
+                    for index, pr in enumerate(batch)
+                ) + "\n}",
+                {},
+                partial=True,
             )
-            blocks.append(
-                f"  r{index}: repository(owner:{json.dumps(owner)}, name:{json.dumps(name)}) {{ {candidates} }}"
-            )
-        for index, pr in enumerate(prs):
+            nodes = {pr.id: (data.get(f"p{index}") or {}).get("pullRequest") or {} for index, pr in enumerate(batch)}
+            rules = self.codeowners_at({(pr.repo, nodes[pr.id].get("baseRefOid")) for pr in batch if nodes[pr.id]})
+            for pr in batch:
+                node = nodes[pr.id]
+                base = (pr.repo, node.get("baseRefOid"))
+                if base not in rules or (paths := self.all_paths(pr, node.get("files") or {})) is None:
+                    continue  # PR, fichiers ou règles hors de portée : inconnue, pas sans propriétaire
+                groups = {
+                    kept
+                    for group in codeowners.groups(paths, rules[base])
+                    if (kept := tuple(owner for owner in group if owner != pr.author))
+                }
+                self.owner_groups[_owner_key(pr)] = tuple(sorted(groups))
+        return {pr.id: found for pr in wanted if (found := self.owner_groups.get(_owner_key(pr))) is not None}
+
+    def all_paths(self, pr: PullRequest, files: dict) -> list[str] | None:
+        """Tous les chemins modifiés d'une PR, page par page ; rien au-delà de OWNER_PAGES pages."""
+        paths = [f["path"] for f in (files.get("nodes") or []) if f]
+        info = files.get("pageInfo") or {}
+        for _ in range(OWNER_PAGES):
+            if not info.get("hasNextPage"):
+                return paths
             owner, _, name = pr.repo.partition("/")
-            blocks.append(
-                f"  p{index}: repository(owner:{json.dumps(owner)}, name:{json.dumps(name)}) {{ "
-                f"pullRequest(number:{pr.number}) {{ files(first:{OWNER_FILES}) {{ nodes {{ path }} }} }} }}"
-            )
-        data = self.graphql("query {\n" + "\n".join(blocks) + "\n}", {})
-        rules = {}
-        for index, repo in enumerate(repos):
-            block = data.get(f"r{index}") or {}
-            text = next(
-                ((block.get(f"c{rank}") or {}).get("text") for rank in range(len(codeowners.PATHS))
-                 if (block.get(f"c{rank}") or {}).get("text")),
-                "",
-            )
-            rules[repo] = codeowners.parse(text)
-        found: dict[str, tuple[str, ...]] = {}
-        for index, pr in enumerate(prs):
-            node = ((data.get(f"p{index}") or {}).get("pullRequest") or {})
-            paths = [f["path"] for f in ((node.get("files") or {}).get("nodes") or [])]
-            owners = set(codeowners.owners(paths, rules.get(pr.repo, ())))
-            # Les mêmes exclusions que GitHub applique à ses propres demandes, sans quoi les
-            # deux listes ne voudraient pas dire la même chose : jamais l'auteur, et plus
-            # personne qui a déjà rendu son avis.
-            owners -= {pr.author} | {review.author for review in pr.reviews}
-            if owners:
-                found[pr.id] = tuple(sorted(owners))
-        return found
+            block = ((self.graphql(
+                "query($o:String!,$r:String!,$n:Int!,$a:String) { repository(owner:$o, name:$r) { pullRequest(number:$n) {"
+                f" files(first:{OWNER_FILES}, after:$a) {{ pageInfo {{ hasNextPage endCursor }} nodes {{ path }} }} }} }} }}",
+                {"o": owner, "r": name, "n": pr.number, "a": info.get("endCursor")},
+            ).get("repository") or {}).get("pullRequest") or {}).get("files") or {}
+            paths += [f["path"] for f in (block.get("nodes") or []) if f]
+            info = block.get("pageInfo") or {}
+        return None if info.get("hasNextPage") else paths
+
+    def codeowners_at(self, bases: set) -> dict[tuple[str, str], tuple]:
+        """Règles CODEOWNERS de chaque (dépôt, commit), lues une fois : un commit ne change pas."""
+        missing = sorted(base for base in bases if base[1] and base not in self.codeowners)
+        if missing:
+            blocks = []
+            for index, (repo, oid) in enumerate(missing):
+                owner, _, name = repo.partition("/")
+                candidates = " ".join(
+                    f'c{rank}: object(expression:{json.dumps(oid + ":" + path)}) {{ ... on Blob {{ text }} }}'
+                    for rank, path in enumerate(codeowners.PATHS)
+                )
+                blocks.append(f"  r{index}: repository(owner:{json.dumps(owner)}, name:{json.dumps(name)}) {{ {candidates} }}")
+            data = self.graphql("query {\n" + "\n".join(blocks) + "\n}", {}, partial=True)
+            for index, base in enumerate(missing):
+                block = data.get(f"r{index}")
+                if block is None:
+                    continue
+                text = next(
+                    ((block.get(f"c{rank}") or {}).get("text") for rank in range(len(codeowners.PATHS))
+                     if (block.get(f"c{rank}") or {}).get("text")),
+                    "",
+                )
+                self.codeowners[base] = codeowners.parse(text)
+        return {base: self.codeowners[base] for base in bases if base in self.codeowners}
 
     def with_code_owners(self, prs: list[PullRequest]) -> list[PullRequest]:
-        """Les mêmes PR, complétées des propriétaires que GitHub n'a pas encore sollicités."""
-        found = self.fetch_code_owners([pr for pr in prs if not pr.code_owners])
-        return [replace(pr, code_owners=found[pr.id]) if pr.id in found else pr for pr in prs]
+        """Les mêmes PR, avec les propriétaires de leurs fichiers, et ceux que GitHub n'a pas encore
+        sollicités sur une PR ouverte.
+
+        Là où GitHub a posé ses demandes, on ne les refait pas : sa liste est la vérité. Ailleurs —
+        un draft —, ce sont les propriétaires moins l'auteur et ceux qui ont déjà rendu leur avis,
+        les mêmes exclusions que GitHub applique à ses propres demandes.
+        """
+        found = self.fetch_owner_groups(prs)
+        done = []
+        for pr in prs:
+            groups = found.get(pr.id)
+            asked = pr.code_owners
+            if not asked and groups and pr.state == "OPEN":
+                asked = tuple(sorted(set().union(*groups) - {review.author for review in pr.reviews}))
+            done.append(replace(pr, owner_groups=groups, code_owners=asked))
+        return done
+
+    def with_closure_owners(self, closures: list[Closure]) -> list[Closure]:
+        """Les mêmes clôtures, leurs PR complétées des propriétaires de leurs fichiers."""
+        prs = self.with_code_owners([closure.pr for closure in closures])
+        return [replace(closure, pr=pr) for closure, pr in zip(closures, prs)]
 
     def fetch_notifications(self) -> tuple[list[dict], str]:
         """Boîte des non-lues, paginée : une mention peut être très loin dans la pile.
@@ -999,6 +1094,14 @@ def _parse_closure(node: dict, source: str) -> Closure | None:
         head=node.get("headRefName") or "",
         base=node.get("baseRefName") or "",
         sources={source},
+        # De quoi dire, PR close, si la review de code owner exigée a été rendue : le dernier avis
+        # tranché de chacun, que les réponses dans les fils ne poussent pas hors de la fenêtre.
+        reviews=tuple(
+            Review(author=(r.get("author") or {}).get("login") or "ghost", state=r.get("state") or "",
+                   submitted_at=parse_ts(r.get("submittedAt")))
+            for r in ((node.get("latestOpinionatedReviews") or {}).get("nodes") or [])
+        ),
+        rules=_parse_rules(node.get("baseRef") or {})[1],
     )
     return Closure(
         pr=pr,
@@ -1007,6 +1110,37 @@ def _parse_closure(node: dict, source: str) -> Closure | None:
         actor_avatar=acteur.get("avatarUrl") or "",
         at=quand,
     )
+
+
+def _owner_key(pr: PullRequest) -> tuple:
+    return pr.id, pr.last_commit_at, pr.base
+
+
+def _parse_rules(base: dict) -> tuple[list[str], tuple[Rule, ...]]:
+    """Contrôles obligatoires et règles de la branche visée : les rulesets d'abord, puis la
+    protection de branche classique, que GitHub expose à part.
+
+    Ce que la protection classique exige ne se lit pas sans droits d'administration : elle reste
+    une règle dont on ne sait rien, donc jamais contournée.
+    """
+    nodes = [rule for rule in ((base.get("rules") or {}).get("nodes") or []) if rule]
+    required = [
+        check.get("context") or ""
+        for rule in nodes
+        for check in ((rule.get("parameters") or {}).get("requiredStatusChecks") or [])
+    ] + list((base.get("refUpdateRule") or {}).get("requiredStatusCheckContexts") or [])
+    rules = tuple(
+        Rule(
+            kind=rule.get("type") or "",
+            ruleset=(rule.get("repositoryRuleset") or {}).get("databaseId") or 0,
+            approvals=params.get("requiredApprovingReviewCount") or 0,
+            code_owner=bool(params.get("requireCodeOwnerReview")),
+            unchecked=bool(params.get("requireLastPushApproval") or params.get("requiredReviewThreadResolution")),
+        )
+        for rule in nodes
+        for params in [rule.get("parameters") or {}]
+    ) + ((Rule(kind="CLASSIC"),) if base.get("refUpdateRule") else ())
+    return required, rules
 
 
 def _parse_pr(node: dict) -> PullRequest:
@@ -1039,6 +1173,8 @@ def _parse_pr(node: dict) -> PullRequest:
     for comment in tuple(c for t in threads for c in t.comments) + comments:
         if comment.avatar:
             portraits.setdefault(comment.author, comment.avatar)
+    required, rules = _parse_rules(node.get("baseRef") or {})
+    ran = {c.get("name") or c.get("context") for c in ((rollup.get("contexts") or {}).get("nodes") or []) if c}
     return PullRequest(
         id=node["id"],
         repo=node["repository"]["nameWithOwner"],
@@ -1052,6 +1188,9 @@ def _parse_pr(node: dict) -> PullRequest:
         updated_at=parse_ts(node.get("updatedAt")),
         review_decision=node.get("reviewDecision"),
         mergeable=node.get("mergeable"),
+        merge_state=node.get("mergeStateStatus"),
+        missing_checks=tuple(check for check in required if check and check not in ran),
+        rules=rules,
         ci_state=rollup.get("state"),
         reviewers=tuple(reviewers),
         code_owners=tuple(owners),
